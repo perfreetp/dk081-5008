@@ -105,6 +105,17 @@ export type OrderStatus =
   | 'disputing'
   | 'cancelled';
 
+export type AfterSalesActionType =
+  | 'confirm_adaptation'
+  | 'apply_dispute'
+  | 'contact_seller'
+  | 'contact_buyer'
+  | 'submit_evidence'
+  | 'arbitration_decision'
+  | 'release_final'
+  | 'freeze_funds'
+  | 'cancel_order';
+
 export interface RelaySubOrderSnapshot {
   subOrderId: string;
   supplierId: string;
@@ -140,7 +151,16 @@ export interface GuaranteeOrder {
   relayOrderIds?: string[];
   isRelayParent?: boolean;
   relaySubOrders?: string[];
-  relaySummary?: { totalSuppliers: number; totalQty: number; totalAmount: number };
+  relaySummary?: {
+    totalSuppliers: number;
+    totalQty: number;
+    totalAmount: number;
+    totalDeposit: number;
+    totalGoods: number;
+    totalShipping: number;
+    originalTotalAmount?: number;
+    cancelledAmount?: number;
+  };
   relaySubOrderSnapshots?: RelaySubOrderSnapshot[];
   adaptConfirm?: AdaptConfirm;
   dispute?: DisputeRecord;
@@ -164,6 +184,7 @@ export interface OrderTimelineItem {
   operatorId: string;
   remark: string;
   images?: string[];
+  actionType?: AfterSalesActionType;
 }
 
 export interface AdaptConfirm {

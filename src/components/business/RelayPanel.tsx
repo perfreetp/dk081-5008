@@ -14,6 +14,7 @@ import {
   Shield,
   ShoppingCart,
   Info,
+  MapPin,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { RelayItem, UrgentPost } from '../../types';
@@ -25,7 +26,15 @@ import { cn } from '../../lib/utils';
 import { formatPrice, formatQuantity, formatTime } from '../../utils/format';
 import { useOrderStore } from '../../stores/orderStore';
 
-const DEFAULT_SHIPPING_FEE = 10;
+export const DEFAULT_SHIPPING_FEE = 10;
+
+export function calculateSubOrderAmounts(quantity: number, unitPrice: number) {
+  const goodsAmount = quantity * unitPrice;
+  const shippingFee = DEFAULT_SHIPPING_FEE;
+  const totalAmount = goodsAmount + shippingFee;
+  const depositAmount = Math.round(totalAmount * 0.3);
+  return { goodsAmount, shippingFee, totalAmount, depositAmount };
+}
 
 interface RelayPanelProps {
   post: UrgentPost;
@@ -143,10 +152,10 @@ function RelayCard({
   onToggleExpand,
 }: RelayCardProps) {
   const config = statusConfig[item.status];
-  const goodsAmount = item.unitPrice * item.quantity;
-  const shippingFee = DEFAULT_SHIPPING_FEE;
-  const subTotal = goodsAmount + shippingFee;
-  const depositAmount = Math.round(subTotal * 0.3);
+  const { goodsAmount, shippingFee, totalAmount: subTotal, depositAmount } = calculateSubOrderAmounts(
+    item.quantity,
+    item.unitPrice
+  );
 
   return (
     <motion.div
@@ -331,6 +340,14 @@ function ConfirmModal({
 }: ConfirmModalProps) {
   if (!isOpen) return null;
 
+  const handleConfirm = () => {
+    if (selectedItems.length === 0) {
+      alert('请先勾选供应商');
+      return;
+    }
+    onConfirm();
+  };
+
   return (
     <AnimatePresence>
       <motion.div
@@ -371,9 +388,10 @@ function ConfirmModal({
               供应商明细
             </div>
             {selectedItems.map((item, idx) => {
-              const goodsAmount = item.unitPrice * item.quantity;
-              const shippingFee = DEFAULT_SHIPPING_FEE;
-              const subTotal = goodsAmount + shippingFee;
+              const { goodsAmount, shippingFee, totalAmount: subTotal, depositAmount: subDeposit } = calculateSubOrderAmounts(
+                item.quantity,
+                item.unitPrice
+              );
               return (
                 <motion.div
                   key={item.id}
@@ -389,10 +407,16 @@ function ConfirmModal({
                       className="w-10 h-10 rounded-full flex-shrink-0"
                     />
                     <div className="flex-1 min-w-0">
-                      <div className="text-sm font-medium text-gray-800 truncate">
-                        {item.supplier.name}
+                      <div className="flex items-center gap-1.5 mb-0.5">
+                        <span className="text-sm font-medium text-gray-800 truncate">
+                          {item.supplier.name}
+                        </span>
+                        <span className="inline-flex items-center px-1.5 py-0.5 rounded-md bg-gray-100 text-gray-600 text-[10px] font-medium">
+                          待支付
+                        </span>
                       </div>
-                      <div className="text-[11px] text-gray-500">
+                      <div className="text-[11px] text-gray-500 flex items-center gap-1">
+                        <MapPin size={9} className="text-gray-400" />
                         {item.supplier.city} · x{item.quantity}件 · 单价{formatPrice(item.unitPrice)}
                       </div>
                     </div>
@@ -402,7 +426,7 @@ function ConfirmModal({
                       </div>
                     </div>
                   </div>
-                  <div className="ml-13 pl-13 grid grid-cols-3 gap-2 pt-2 border-t border-gray-200/70">
+                  <div className="ml-13 pl-13 grid grid-cols-4 gap-2 pt-2 border-t border-gray-200/70">
                     <div className="text-center">
                       <div className="text-[10px] text-gray-400 mb-0.5">货款</div>
                       <div className="text-[11px] font-semibold text-gray-700">
@@ -418,7 +442,13 @@ function ConfirmModal({
                     <div className="text-center">
                       <div className="text-[10px] text-gray-400 mb-0.5">定金</div>
                       <div className="text-[11px] font-semibold text-amber-600">
-                        {formatPrice(Math.round(subTotal * 0.3))}
+                        {formatPrice(subDeposit)}
+                      </div>
+                    </div>
+                    <div className="text-center">
+                      <div className="text-[10px] text-gray-400 mb-0.5">合计</div>
+                      <div className="text-[11px] font-semibold text-red-500">
+                        {formatPrice(subTotal)}
                       </div>
                     </div>
                   </div>
@@ -488,7 +518,7 @@ function ConfirmModal({
               size="lg"
               variant="primary"
               block
-              onClick={onConfirm}
+              onClick={handleConfirm}
               loading={isSubmitting}
               leftIcon={<ShoppingCart size={16} />}
               className="bg-gradient-to-r from-indigo-500 to-violet-500"
@@ -543,7 +573,14 @@ export default function RelayPanel({ post, onJoinRelay, onSubmitRelay, onConfirm
 
   const selectedShippingTotal = selectedItems.length * DEFAULT_SHIPPING_FEE;
   const selectedTotalAmount = selectedGoodsTotal + selectedShippingTotal;
-  const depositAmount = Math.round(selectedTotalAmount * 0.3);
+  const depositAmount = useMemo(
+    () =>
+      selectedItems.reduce(
+        (sum, item) => sum + calculateSubOrderAmounts(item.quantity, item.unitPrice).depositAmount,
+        0
+      ),
+    [selectedItems]
+  );
 
   const toggleSelect = (id: string) => {
     setSelectedIds((prev) => {
@@ -766,10 +803,17 @@ export default function RelayPanel({ post, onJoinRelay, onSubmitRelay, onConfirm
                   block
                   disabled={selectedItems.length === 0}
                   onClick={() => setShowConfirmModal(true)}
-                  className="bg-gradient-to-r from-indigo-500 to-violet-500 disabled:from-gray-300 disabled:to-gray-400"
+                  className={cn(
+                    "bg-gradient-to-r disabled:cursor-not-allowed",
+                    selectedItems.length === 0
+                      ? "from-gray-300 to-gray-400"
+                      : "from-indigo-500 to-violet-500"
+                  )}
                   leftIcon={<ShoppingCart size={14} />}
                 >
-                  一键合并下单
+                  {selectedItems.length === 0
+                    ? "请先勾选至少1家供应商"
+                    : `一键合并下单 · ${selectedItems.length}家 · ${formatPrice(selectedTotalAmount)}`}
                 </Button>
               </div>
             )}

@@ -23,6 +23,10 @@ import {
   Sparkles,
   Phone,
   MessageCircle,
+  Gavel,
+  Paperclip,
+  Snowflake,
+  Handshake,
 } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useOrderStore } from '../../stores/orderStore';
@@ -32,7 +36,8 @@ import Button from '../../components/ui/Button';
 import Badge from '../../components/ui/Badge';
 import Card, { CardContent } from '../../components/ui/Card';
 import { cn } from '../../lib/utils';
-import { GuaranteeOrder, OrderStatus } from '../../types';
+import { formatTime } from '../../utils/format';
+import { GuaranteeOrder, OrderStatus, AfterSalesActionType } from '../../types';
 
 type TabKey = 'pending_payment' | 'pending_ship' | 'pending_confirm' | 'completed' | 'dispute';
 type SourceType = 'all' | 'urgent' | 'stock' | 'relay';
@@ -150,6 +155,18 @@ const CONDITION_LABEL: Record<string, string> = {
   new: '全新',
   used: '拆车',
   refurbished: '翻新',
+};
+
+const AFTER_SALES_ACTION_CONFIG: Record<AfterSalesActionType, { label: string; color: string; icon: React.ReactNode }> = {
+  confirm_adaptation: { label: '确认适配', color: 'text-green-600', icon: <CheckCircle2 size={10} /> },
+  apply_dispute: { label: '申请争议', color: 'text-red-600', icon: <AlertTriangle size={10} /> },
+  contact_seller: { label: '联系卖家', color: 'text-blue-600', icon: <MessageCircle size={10} /> },
+  contact_buyer: { label: '联系买家', color: 'text-blue-600', icon: <MessageCircle size={10} /> },
+  submit_evidence: { label: '提交举证', color: 'text-purple-600', icon: <Paperclip size={10} /> },
+  arbitration_decision: { label: '仲裁裁决', color: 'text-amber-600', icon: <Gavel size={10} /> },
+  release_final: { label: '释放尾款', color: 'text-green-600', icon: <Coins size={10} /> },
+  freeze_funds: { label: '冻结资金', color: 'text-red-600', icon: <Snowflake size={10} /> },
+  cancel_order: { label: '取消订单', color: 'text-gray-500', icon: <X size={10} /> },
 };
 
 function OrderCard({
@@ -463,6 +480,25 @@ function OrderCard({
           </div>
         </div>
 
+        {(() => {
+          const actionItems = order.timeline.filter((t) => t.actionType);
+          if (actionItems.length === 0) return null;
+          const lastAction = actionItems[actionItems.length - 1];
+          const actionConfig = AFTER_SALES_ACTION_CONFIG[lastAction.actionType!];
+          const operatorName = lastAction.operatorId === order.buyerId ? order.buyer.name : lastAction.operatorId === order.supplierId ? order.supplier.name : '平台';
+          return (
+            <div className="px-4 py-2 border-t border-gray-100 bg-gray-50/80 flex items-center gap-2 text-[11px]">
+              <span className="text-gray-400">最近：</span>
+              <span className="text-gray-500">{formatTime(lastAction.timestamp)}</span>
+              <span className={cn('flex items-center gap-1 font-medium', actionConfig.color)}>
+                {actionConfig.icon}
+                {actionConfig.label}
+              </span>
+              <span className="text-gray-500">{operatorName}</span>
+            </div>
+          );
+        })()}
+
         {order.isRelayParent && subOrders.length > 0 && (
           <div className="border-t border-gray-100">
             <button
@@ -641,7 +677,7 @@ export default function OrderList() {
     return result.sort(
       (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
     );
-  }, [orders, activeTab, activeSourceTab, searchQuery, onlyRelay, onlyUrgent, timeRange]);
+  }, [orders, activeTab, activeSourceTab, searchQuery, onlyRelay, onlyUrgent, timeRange, afterSalesFilter, getPendingInspectionOrders, getNearTimeoutOrders, getInDisputeOrders]);
 
   const tabCounts = useMemo(() => {
     const counts: Record<TabKey, number> = {
@@ -687,7 +723,14 @@ export default function OrderList() {
     }
   };
 
+  const handleClearAfterSalesFilter = () => {
+    setAfterSalesFilter('none');
+    setActiveTab('pending_ship');
+    setActiveSourceTab('all');
+  };
+
   const handleQuickAction = (action: string, orderId: string) => {
+    const { addAfterSalesAction } = useOrderStore.getState();
     switch (action) {
       case 'confirm_adapt':
         navigate(`/order/${orderId}`, { state: { fromAfterSales: afterSalesFilter } });
@@ -696,6 +739,7 @@ export default function OrderList() {
         navigate(`/order/${orderId}/dispute`);
         break;
       case 'contact_seller':
+        addAfterSalesAction(orderId, 'contact_seller', '用户发起联系卖家');
         alert('正在跳转到联系卖家页面...');
         break;
       default:
@@ -703,34 +747,99 @@ export default function OrderList() {
     }
   };
 
+  const afterSalesDeskConfig: Record<Exclude<AfterSalesFilter, 'none'>, { title: string; gradient: string; textColor: string; count: number }> = {
+    pending_inspection: {
+      title: '待验货适配',
+      gradient: 'from-blue-600 to-blue-400',
+      textColor: 'text-blue-600',
+      count: pendingInspectionCount,
+    },
+    near_timeout: {
+      title: '快超时',
+      gradient: 'from-orange-600 to-orange-400',
+      textColor: 'text-orange-600',
+      count: nearTimeoutCount,
+    },
+    in_dispute: {
+      title: '争议中',
+      gradient: 'from-red-600 to-red-400',
+      textColor: 'text-red-600',
+      count: inDisputeCount,
+    },
+  };
+
+  const isAfterSalesDeskMode = afterSalesFilter !== 'none';
+
   return (
     <div className="min-h-screen bg-gray-50 pb-24">
       <motion.div
         initial={{ y: -20, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
-        className="sticky top-0 z-40 bg-white/90 backdrop-blur-lg border-b border-gray-100"
+        className={cn(
+          'sticky top-0 z-40 backdrop-blur-lg border-b transition-all',
+          isAfterSalesDeskMode
+            ? cn('bg-gradient-to-r', afterSalesDeskConfig[afterSalesFilter as Exclude<AfterSalesFilter, 'none'>].gradient, 'border-white/20')
+            : 'bg-white/90 border-gray-100'
+        )}
       >
-        <div className="px-4 py-3">
-          <div className="flex items-center justify-between mb-3">
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-primary-600 to-primary-400 flex items-center justify-center">
-                <ArrowRightLeft size={16} className="text-white" />
+        {isAfterSalesDeskMode ? (
+          <div className="px-4 py-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-white/20 flex items-center justify-center">
+                  {afterSalesFilter === 'pending_inspection' && <PackageSearch size={20} className="text-white" />}
+                  {afterSalesFilter === 'near_timeout' && <Clock size={20} className="text-white" />}
+                  {afterSalesFilter === 'in_dispute' && <AlertTriangle size={20} className="text-white" />}
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h1 className="text-lg font-bold text-white">售后处理台</h1>
+                    <span className="px-2 py-0.5 rounded-lg bg-white/20 text-white text-[10px] font-semibold">
+                      {afterSalesDeskConfig[afterSalesFilter as Exclude<AfterSalesFilter, 'none'>].title}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-white/70">专注处理此类售后问题</p>
+                </div>
               </div>
-              <div>
-                <h1 className="text-lg font-bold text-gray-900">担保订单</h1>
-                <p className="text-[10px] text-gray-400">平台托管，交易无忧</p>
+              <div className="flex items-center gap-3">
+                <div className="text-right">
+                  <div className="text-2xl font-extrabold text-white">
+                    {afterSalesDeskConfig[afterSalesFilter as Exclude<AfterSalesFilter, 'none'>].count}
+                  </div>
+                  <div className="text-[10px] text-white/70">待处理</div>
+                </div>
+                <button
+                  onClick={handleClearAfterSalesFilter}
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/20 text-white text-xs font-medium hover:bg-white/30 transition-colors"
+                >
+                  <X size={14} />
+                  清除筛选
+                </button>
               </div>
             </div>
-            <button
-              onClick={() => fetchOrders()}
-              className="w-9 h-9 rounded-xl bg-gray-100 flex items-center justify-center hover:bg-gray-200 transition-colors"
-            >
-              <RefreshCw
-                size={16}
-                className={cn('text-gray-600', isLoading && 'animate-spin')}
-              />
-            </button>
           </div>
+        ) : (
+          <div className="px-4 py-3">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-primary-600 to-primary-400 flex items-center justify-center">
+                  <ArrowRightLeft size={16} className="text-white" />
+                </div>
+                <div>
+                  <h1 className="text-lg font-bold text-gray-900">担保订单</h1>
+                  <p className="text-[10px] text-gray-400">平台托管，交易无忧</p>
+                </div>
+              </div>
+              <button
+                onClick={() => fetchOrders()}
+                className="w-9 h-9 rounded-xl bg-gray-100 flex items-center justify-center hover:bg-gray-200 transition-colors"
+              >
+                <RefreshCw
+                  size={16}
+                  className={cn('text-gray-600', isLoading && 'animate-spin')}
+                />
+              </button>
+            </div>
 
           <div className="flex items-center gap-2">
             <div className="flex-1 relative">
@@ -771,10 +880,12 @@ export default function OrderList() {
               )}
             </button>
           </div>
-        </div>
+          </div>
+        )}
 
-        <AnimatePresence>
-          {showFilter && (
+        {!isAfterSalesDeskMode && (
+          <AnimatePresence>
+            {showFilter && (
             <motion.div
               initial={{ height: 0, opacity: 0 }}
               animate={{ height: 'auto', opacity: 1 }}
@@ -825,13 +936,15 @@ export default function OrderList() {
             </motion.div>
           )}
         </AnimatePresence>
+        )}
 
-        <div className="px-4 pb-2 overflow-x-auto scrollbar-hide">
-          <div className="flex gap-1 min-w-max">
-            {SOURCE_TABS.map((tab) => (
-              <button
-                key={tab.key}
-                onClick={() => setActiveSourceTab(tab.key)}
+        {!isAfterSalesDeskMode && (
+          <div className="px-4 pb-2 overflow-x-auto scrollbar-hide">
+            <div className="flex gap-1 min-w-max">
+              {SOURCE_TABS.map((tab) => (
+                <button
+                  key={tab.key}
+                  onClick={() => setActiveSourceTab(tab.key)}
                 className={cn(
                   'flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium transition-all whitespace-nowrap',
                   activeSourceTab === tab.key
@@ -844,9 +957,13 @@ export default function OrderList() {
               </button>
             ))}
           </div>
-        </div>
+          </div>
+        )}
 
-        <div className="px-4 pb-3 overflow-x-auto scrollbar-hide">
+        <div className={cn(
+          'px-4 overflow-x-auto scrollbar-hide',
+          isAfterSalesDeskMode ? 'py-3 bg-white/10' : 'pb-3'
+        )}>
           <div className="flex gap-1 min-w-max">
             {TABS.map((tab) => (
               <button
@@ -855,8 +972,12 @@ export default function OrderList() {
                 className={cn(
                   'relative flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl text-xs font-medium transition-all whitespace-nowrap',
                   activeTab === tab.key
-                    ? cn(tab.activeBg, tab.color, 'shadow-sm')
-                    : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'
+                    ? isAfterSalesDeskMode
+                      ? 'bg-white/25 text-white shadow-sm'
+                      : cn(tab.activeBg, tab.color, 'shadow-sm')
+                    : isAfterSalesDeskMode
+                      ? 'text-white/70 hover:text-white hover:bg-white/10'
+                      : 'text-gray-500 hover:text-gray-700 hover:bg-gray-50'
                 )}
               >
                 {tab.icon}
@@ -866,14 +987,18 @@ export default function OrderList() {
                     className={cn(
                       'min-w-[16px] h-4 px-1 rounded-full text-[10px] font-bold flex items-center justify-center',
                       activeTab === tab.key
-                        ? 'bg-white/80 text-inherit'
-                        : 'bg-gray-200 text-gray-600'
+                        ? isAfterSalesDeskMode
+                          ? 'bg-white/30 text-white'
+                          : 'bg-white/80 text-inherit'
+                        : isAfterSalesDeskMode
+                          ? 'bg-white/20 text-white/80'
+                          : 'bg-gray-200 text-gray-600'
                     )}
                   >
                     {tabCounts[tab.key] > 99 ? '99+' : tabCounts[tab.key]}
                   </span>
                 )}
-                {activeTab === tab.key && (
+                {activeTab === tab.key && !isAfterSalesDeskMode && (
                   <motion.div
                     layoutId="orderTabIndicator"
                     className="absolute -bottom-0.5 left-1/2 -translate-x-1/2 w-6 h-0.5 rounded-full bg-current"
@@ -998,7 +1123,7 @@ export default function OrderList() {
           </motion.div>
         )}
 
-        {totalAlertsCount > 0 ? (
+        {!isAfterSalesDeskMode && totalAlertsCount > 0 ? (
           <motion.div
             initial={{ opacity: 0, y: -10 }}
             animate={{ opacity: 1, y: 0 }}
@@ -1012,9 +1137,7 @@ export default function OrderList() {
                 onClick={() => handleAfterSalesCardClick('pending_inspection')}
                 className={cn(
                   'cursor-pointer p-3 rounded-2xl border transition-all',
-                  afterSalesFilter === 'pending_inspection'
-                    ? 'bg-blue-50 border-blue-300 shadow-md'
-                    : pendingInspectionCount === 0
+                  pendingInspectionCount === 0
                     ? 'bg-gray-50 border-gray-100 opacity-50'
                     : 'bg-white border-blue-100 hover:bg-blue-50/50 hover:border-blue-200'
                 )}
@@ -1062,9 +1185,7 @@ export default function OrderList() {
                 onClick={() => handleAfterSalesCardClick('near_timeout')}
                 className={cn(
                   'cursor-pointer p-3 rounded-2xl border transition-all',
-                  afterSalesFilter === 'near_timeout'
-                    ? 'bg-orange-50 border-orange-300 shadow-md'
-                    : nearTimeoutCount === 0
+                  nearTimeoutCount === 0
                     ? 'bg-gray-50 border-gray-100 opacity-50'
                     : 'bg-white border-orange-100 hover:bg-orange-50/50 hover:border-orange-200'
                 )}
@@ -1112,9 +1233,7 @@ export default function OrderList() {
                 onClick={() => handleAfterSalesCardClick('in_dispute')}
                 className={cn(
                   'cursor-pointer p-3 rounded-2xl border transition-all',
-                  afterSalesFilter === 'in_dispute'
-                    ? 'bg-red-50 border-red-300 shadow-md'
-                    : inDisputeCount === 0
+                  inDisputeCount === 0
                     ? 'bg-gray-50 border-gray-100 opacity-50'
                     : 'bg-white border-red-100 hover:bg-red-50/50 hover:border-red-200'
                 )}
@@ -1168,7 +1287,7 @@ export default function OrderList() {
           </motion.div>
         )}
 
-        {afterSalesFilter !== 'none' && (
+        {!isAfterSalesDeskMode && afterSalesFilter !== 'none' && (
           <motion.div
             initial={{ opacity: 0, height: 0 }}
             animate={{ opacity: 1, height: 'auto' }}
@@ -1180,14 +1299,14 @@ export default function OrderList() {
               size="sm"
               icon={afterSalesFilter === 'pending_inspection' ? <PackageSearch size={11} /> : afterSalesFilter === 'near_timeout' ? <Clock size={11} /> : <AlertTriangle size={11} />}
               closable
-              onClose={() => setAfterSalesFilter('none')}
+              onClose={handleClearAfterSalesFilter}
             >
               {afterSalesFilter === 'pending_inspection' && `待验货 (${pendingInspectionCount})`}
               {afterSalesFilter === 'near_timeout' && `快超时 (${nearTimeoutCount})`}
               {afterSalesFilter === 'in_dispute' && `争议中 (${inDisputeCount})`}
             </Chip>
             <button
-              onClick={() => setAfterSalesFilter('none')}
+              onClick={handleClearAfterSalesFilter}
               className="text-xs text-gray-400 hover:text-gray-600"
             >
               清除筛选

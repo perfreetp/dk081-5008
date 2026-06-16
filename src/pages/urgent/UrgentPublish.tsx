@@ -27,6 +27,12 @@ import {
   Truck,
   Check,
   Info,
+  Settings,
+  RotateCcw,
+  Minus,
+  Plus,
+  Scale,
+  Trophy,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useVoiceInput } from '../../hooks/useVoiceInput';
@@ -786,11 +792,32 @@ const GROUP_TABS: { key: GroupKey; label: string }[] = [
   { key: 'highReputation', label: '高信誉' },
 ];
 
+interface WeightConfig {
+  nearCity: number;
+  shipToday: number;
+  reputation: number;
+  price: number;
+}
+
+const DEFAULT_WEIGHTS: WeightConfig = {
+  nearCity: 70,
+  shipToday: 100,
+  reputation: 60,
+  price: 80,
+};
+
+const FIXED_WEIGHTS = {
+  sameBrand: 30,
+  sameCategory: 20,
+  hasStock: 10,
+};
+
 interface MatchDetail {
   key: string;
   label: string;
   matched: boolean;
   score: number;
+  maxScore: number;
 }
 
 interface RecommendedSupplier {
@@ -808,6 +835,7 @@ interface RecommendedSupplier {
   isSameCity: boolean;
   distanceKm: number;
   reputationPercent: number;
+  priceAdvantageScore: number;
 }
 
 function RecommendReasonModal({
@@ -898,7 +926,7 @@ function RecommendReasonModal({
                   detail.matched ? 'text-green-600' : 'text-gray-400'
                 )}
               >
-                +{detail.score}分
+                {detail.score}/{detail.maxScore}分
               </div>
             </div>
           ))}
@@ -915,8 +943,264 @@ function RecommendReasonModal({
               <li>· 当天发车：供应商支持当天发货</li>
               <li>· 高信誉：供应商星级评分≥4.7分</li>
               <li>· 有现货：库存数量大于0</li>
+              <li>· 价格优势：价格相对最低价格的比例，越低得分越高</li>
             </ul>
           </div>
+        </div>
+      </motion.div>
+    </AnimatePresence>
+  );
+}
+
+interface WeightSliderProps {
+  icon: string;
+  label: string;
+  color: string;
+  trackColor: string;
+  value: number;
+  min?: number;
+  max?: number;
+  step?: number;
+  onChange: (v: number) => void;
+}
+
+function WeightSlider({
+  icon,
+  label,
+  color,
+  trackColor,
+  value,
+  min = 0,
+  max = 100,
+  step = 5,
+  onChange,
+}: WeightSliderProps) {
+  const handleInput = (e: React.ChangeEvent<HTMLInputElement>) => {
+    let v = parseInt(e.target.value, 10);
+    if (isNaN(v)) v = min;
+    v = Math.max(min, Math.min(max, v));
+    onChange(v);
+  };
+
+  const adjust = (delta: number) => {
+    const v = Math.max(min, Math.min(max, value + delta));
+    onChange(v);
+  };
+
+  const percentage = ((value - min) / (max - min)) * 100;
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <span className="text-base">{icon}</span>
+          <span className="text-sm font-medium text-gray-800">{label}</span>
+        </div>
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={() => adjust(-step)}
+            disabled={value <= min}
+            className={cn(
+              'w-7 h-7 rounded-lg flex items-center justify-center transition-all',
+              value <= min
+                ? 'bg-gray-100 text-gray-300 cursor-not-allowed'
+                : 'bg-gray-100 text-gray-600 hover:bg-gray-200 active:scale-95'
+            )}
+          >
+            <Minus size={14} />
+          </button>
+          <input
+            type="number"
+            min={min}
+            max={max}
+            value={value}
+            onChange={handleInput}
+            className="w-14 h-8 text-center text-sm font-bold rounded-lg border border-gray-200 focus:outline-none focus:ring-2 focus:ring-primary-300 focus:border-primary-400 bg-white"
+            style={{ color }}
+          />
+          <button
+            type="button"
+            onClick={() => adjust(step)}
+            disabled={value >= max}
+            className={cn(
+              'w-7 h-7 rounded-lg flex items-center justify-center transition-all',
+              value >= max
+                ? 'bg-gray-100 text-gray-300 cursor-not-allowed'
+                : 'bg-gray-100 text-gray-600 hover:bg-gray-200 active:scale-95'
+            )}
+          >
+            <Plus size={14} />
+          </button>
+        </div>
+      </div>
+
+      <div className="relative px-1">
+        <div className="relative h-2 rounded-full bg-gray-100">
+          <div
+            className="absolute left-0 top-0 h-full rounded-full transition-all"
+            style={{ width: `${percentage}%`, backgroundColor: color }}
+          />
+          <input
+            type="range"
+            min={min}
+            max={max}
+            step={1}
+            value={value}
+            onChange={(e) => onChange(parseInt(e.target.value, 10))}
+            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+          />
+          <div
+            className="absolute top-1/2 -translate-y-1/2 w-4 h-4 rounded-full border-2 border-white shadow-md transition-all pointer-events-none"
+            style={{
+              left: `calc(${percentage}% - 8px)`,
+              backgroundColor: color,
+              boxShadow: `0 2px 6px ${color}66`,
+            }}
+          />
+        </div>
+
+        <div className="flex justify-between mt-1 px-0.5">
+          {[0, 25, 50, 75, 100].map((tick) => (
+            <div key={tick} className="flex flex-col items-center">
+              <div
+                className={cn(
+                  'w-px h-1.5',
+                  value >= tick ? trackColor : 'bg-gray-200'
+                )}
+              />
+              <span className="text-[9px] text-gray-400 mt-0.5">{tick}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+interface WeightPanelProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onApply: () => void;
+  weightConfig: WeightConfig;
+  setWeightConfig: React.Dispatch<React.SetStateAction<WeightConfig>>;
+  onReset: () => void;
+}
+
+function WeightPanel({
+  isOpen,
+  onClose,
+  onApply,
+  weightConfig,
+  setWeightConfig,
+  onReset,
+}: WeightPanelProps) {
+  if (!isOpen) return null;
+
+  const setWeight = (key: keyof WeightConfig) => (v: number) => {
+    setWeightConfig((prev) => ({ ...prev, [key]: v }));
+  };
+
+  return (
+    <AnimatePresence>
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        onClick={onClose}
+        className="fixed inset-0 z-50 bg-black/50"
+      />
+      <motion.div
+        initial={{ x: '100%' }}
+        animate={{ x: 0 }}
+        exit={{ x: '100%' }}
+        transition={{ type: 'spring', damping: 28, stiffness: 280 }}
+        className="fixed top-0 right-0 bottom-0 z-50 w-full max-w-sm bg-white shadow-2xl overflow-hidden flex flex-col"
+      >
+        <div className="sticky top-0 bg-white z-10 px-4 py-4 border-b border-gray-100">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-primary-100 to-primary-50 flex items-center justify-center">
+                <Scale size={16} className="text-primary-600" />
+              </div>
+              <h2 className="text-base font-bold text-gray-900">推荐权重设置</h2>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={onReset}
+                className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-gray-500 bg-gray-50 hover:bg-gray-100 transition-colors"
+              >
+                <RotateCcw size={12} />
+                恢复默认
+              </button>
+              <button
+                type="button"
+                onClick={onClose}
+                className="w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center hover:bg-gray-200 transition-colors"
+              >
+                <X size={16} className="text-gray-500" />
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-4 space-y-5">
+          <WeightSlider
+            icon="🏙"
+            label="同城近城"
+            color="#10B981"
+            trackColor="bg-emerald-300"
+            value={weightConfig.nearCity}
+            onChange={setWeight('nearCity')}
+          />
+          <WeightSlider
+            icon="🚚"
+            label="当天可发车"
+            color="#F97316"
+            trackColor="bg-orange-300"
+            value={weightConfig.shipToday}
+            onChange={setWeight('shipToday')}
+          />
+          <WeightSlider
+            icon="⭐"
+            label="商家信誉"
+            color="#3B82F6"
+            trackColor="bg-blue-300"
+            value={weightConfig.reputation}
+            onChange={setWeight('reputation')}
+          />
+          <WeightSlider
+            icon="💰"
+            label="价格优势"
+            color="#EC4899"
+            trackColor="bg-pink-300"
+            value={weightConfig.price}
+            onChange={setWeight('price')}
+          />
+
+          <div className="mt-2 p-3 rounded-xl bg-pink-50 border border-pink-100">
+            <div className="flex items-start gap-2">
+              <span className="text-base mt-0.5">※</span>
+              <p className="text-[11px] text-pink-700 leading-relaxed">
+                价格优势根据 ¥/件 自动换算，价格相对最低价格的比例越低得分越高。
+                例如某配件最低价格 ¥100，则 ¥100 得满分，¥150 约得 66% 权重分。
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="sticky bottom-0 bg-white/95 backdrop-blur border-t border-gray-100 p-4">
+          <Button
+            variant="primary"
+            size="lg"
+            block
+            onClick={onApply}
+            rightIcon={<Trophy size={16} />}
+            className="bg-gradient-to-r from-primary-500 to-primary-600"
+          >
+            应用并返回
+          </Button>
         </div>
       </motion.div>
     </AnimatePresence>
@@ -930,12 +1214,43 @@ function RecommendedSuppliers({ post }: { post: UrgentPost }) {
   const { user } = useAuthStore();
   const [activeGroup, setActiveGroup] = useState<GroupKey>('all');
   const [reasonSupplier, setReasonSupplier] = useState<RecommendedSupplier | null>(null);
+  const [weightPanelOpen, setWeightPanelOpen] = useState(false);
+
+  const storageKey = `recommend_weights_${post.id}`;
+  const [weightConfig, setWeightConfig] = useState<WeightConfig>(() => {
+    try {
+      const saved = localStorage.getItem(storageKey);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        return {
+          nearCity: typeof parsed.nearCity === 'number' ? parsed.nearCity : DEFAULT_WEIGHTS.nearCity,
+          shipToday: typeof parsed.shipToday === 'number' ? parsed.shipToday : DEFAULT_WEIGHTS.shipToday,
+          reputation: typeof parsed.reputation === 'number' ? parsed.reputation : DEFAULT_WEIGHTS.reputation,
+          price: typeof parsed.price === 'number' ? parsed.price : DEFAULT_WEIGHTS.price,
+        };
+      }
+    } catch {
+      // ignore
+    }
+    return { ...DEFAULT_WEIGHTS };
+  });
 
   const postCategoryNorm = normalizeCategory(post.category);
   const publisherCity = post.publisher?.city || '';
 
   const recommendedSuppliers = useMemo(() => {
-    const suppliers: RecommendedSupplier[] = [];
+    const candidates: Array<{
+      stockItem: StockItem;
+      sameBrand: boolean;
+      sameCategory: boolean;
+      nearCity: boolean;
+      shipToday: boolean;
+      highReputation: boolean;
+      hasStock: boolean;
+      isSameCity: boolean;
+      distanceKm: number;
+      starRating: number;
+    }> = [];
     const seenSupplierIds = new Set<string>();
 
     stockItems.forEach((stockItem) => {
@@ -957,34 +1272,69 @@ function RecommendedSuppliers({ post }: { post: UrgentPost }) {
       const highReputation = starRating >= 4.7;
       const nearCity = isNearCity;
 
+      seenSupplierIds.add(stockItem.supplierId);
+      candidates.push({
+        stockItem,
+        sameBrand,
+        sameCategory,
+        nearCity,
+        shipToday,
+        highReputation,
+        hasStock,
+        isSameCity,
+        distanceKm,
+        starRating,
+      });
+    });
+
+    const prices = candidates.map((c) => c.stockItem.unitPrice);
+    const minPrice = prices.length > 0 ? Math.min(...prices) : 1;
+
+    const suppliers: RecommendedSupplier[] = [];
+
+    candidates.forEach((c) => {
+      const { stockItem, sameBrand, sameCategory, nearCity, shipToday, highReputation, hasStock, isSameCity, distanceKm, starRating } = c;
+
+      const sameBrandScore = sameBrand ? FIXED_WEIGHTS.sameBrand : 0;
+      const sameCategoryScore = sameCategory ? FIXED_WEIGHTS.sameCategory : 0;
+      const nearCityScore = nearCity ? weightConfig.nearCity : 0;
+      const shipTodayScore = shipToday ? weightConfig.shipToday : 0;
+      const reputationScore = highReputation ? weightConfig.reputation : 0;
+      const hasStockScore = hasStock ? FIXED_WEIGHTS.hasStock : 0;
+
+      const priceRatio = minPrice / Math.max(1, stockItem.unitPrice);
+      const priceAdvantageScore = Math.round(priceRatio * weightConfig.price);
+      const hasPriceAdvantage = priceAdvantageScore > weightConfig.price * 0.5;
+
       const matchDetails: MatchDetail[] = [
-        { key: 'sameBrand', label: '同品牌匹配', matched: sameBrand, score: 30 },
-        { key: 'sameCategory', label: '同分类匹配', matched: sameCategory, score: 20 },
-        { key: 'nearCity', label: isSameCity ? '同城供应商' : '近城供应商(<50km)', matched: nearCity, score: 15 },
-        { key: 'shipToday', label: '当天可发车', matched: shipToday, score: 25 },
-        { key: 'highReputation', label: '高信誉商家(≥4.7星)', matched: highReputation, score: 20 },
-        { key: 'hasStock', label: '有现货库存', matched: hasStock, score: 10 },
+        { key: 'sameBrand', label: '同品牌匹配', matched: sameBrand, score: sameBrandScore, maxScore: FIXED_WEIGHTS.sameBrand },
+        { key: 'sameCategory', label: '同分类匹配', matched: sameCategory, score: sameCategoryScore, maxScore: FIXED_WEIGHTS.sameCategory },
+        { key: 'nearCity', label: isSameCity ? '同城供应商' : '近城供应商(<50km)', matched: nearCity, score: nearCityScore, maxScore: weightConfig.nearCity },
+        { key: 'shipToday', label: '当天可发车', matched: shipToday, score: shipTodayScore, maxScore: weightConfig.shipToday },
+        { key: 'highReputation', label: '高信誉商家(≥4.7星)', matched: highReputation, score: reputationScore, maxScore: weightConfig.reputation },
+        { key: 'priceAdvantage', label: '价格优势(相对最低价)', matched: hasPriceAdvantage, score: priceAdvantageScore, maxScore: weightConfig.price },
+        { key: 'hasStock', label: '有现货库存', matched: hasStock, score: hasStockScore, maxScore: FIXED_WEIGHTS.hasStock },
       ];
 
-      let score = 0;
-      const matchReasons: string[] = [];
-      matchDetails.forEach((d) => {
-        if (d.matched) {
-          score += d.score;
-          if (d.key === 'sameBrand') matchReasons.push('同品牌');
-          if (d.key === 'sameCategory') matchReasons.push('同分类');
-          if (d.key === 'nearCity') matchReasons.push(isSameCity ? '同城' : '近城');
-          if (d.key === 'shipToday') matchReasons.push('当天发');
-          if (d.key === 'highReputation') matchReasons.push('高信誉');
-          if (d.key === 'hasStock') matchReasons.push('有现货');
-        }
-      });
+      const score = matchDetails.reduce((s, d) => s + d.score, 0);
 
-      const totalScore = matchDetails.reduce((s, d) => s + d.score, 0);
+      const reasonMap: Record<string, { label: string; score: number; key: string }> = {};
+      if (sameBrand) reasonMap.sameBrand = { label: '同品牌', score: sameBrandScore, key: 'sameBrand' };
+      if (sameCategory) reasonMap.sameCategory = { label: '同分类', score: sameCategoryScore, key: 'sameCategory' };
+      if (nearCity) reasonMap.nearCity = { label: isSameCity ? '同城' : '近城', score: nearCityScore, key: 'nearCity' };
+      if (shipToday) reasonMap.shipToday = { label: '当天发', score: shipTodayScore, key: 'shipToday' };
+      if (highReputation) reasonMap.highReputation = { label: '高信誉', score: reputationScore, key: 'highReputation' };
+      if (hasPriceAdvantage) reasonMap.priceAdvantage = { label: '价格优', score: priceAdvantageScore, key: 'priceAdvantage' };
+      if (hasStock) reasonMap.hasStock = { label: '有现货', score: hasStockScore, key: 'hasStock' };
+
+      const matchReasons = Object.values(reasonMap)
+        .sort((a, b) => b.score - a.score)
+        .map((r) => r.label);
+
+      const totalScore = matchDetails.reduce((s, d) => s + d.maxScore, 0);
       const reputationPercent = Math.max(1, Math.round((5 - starRating + 0.1) * 20 + 1));
 
       if (score > 0) {
-        seenSupplierIds.add(stockItem.supplierId);
         suppliers.push({
           stockItem,
           score,
@@ -1000,12 +1350,13 @@ function RecommendedSuppliers({ post }: { post: UrgentPost }) {
           isSameCity,
           distanceKm,
           reputationPercent,
+          priceAdvantageScore,
         });
       }
     });
 
     return suppliers.sort((a, b) => b.score - a.score).slice(0, 8);
-  }, [stockItems, post, user, postCategoryNorm, publisherCity]);
+  }, [stockItems, post, user, postCategoryNorm, publisherCity, weightConfig]);
 
   const filteredSuppliers = useMemo(() => {
     switch (activeGroup) {
@@ -1024,6 +1375,23 @@ function RecommendedSuppliers({ post }: { post: UrgentPost }) {
         return recommendedSuppliers;
     }
   }, [recommendedSuppliers, activeGroup]);
+
+  const persistWeights = () => {
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(weightConfig));
+    } catch {
+      // ignore
+    }
+  };
+
+  const handleApplyWeights = () => {
+    persistWeights();
+    setWeightPanelOpen(false);
+  };
+
+  const handleResetWeights = () => {
+    setWeightConfig({ ...DEFAULT_WEIGHTS });
+  };
 
   const handleChat = (supplierId: string) => {
     if (!user) return;
@@ -1075,45 +1443,80 @@ function RecommendedSuppliers({ post }: { post: UrgentPost }) {
     );
   }
 
+  const getChipStyle = (reason: string) => {
+    switch (reason) {
+      case '当天发':
+        return 'bg-orange-50 text-orange-600';
+      case '同城':
+      case '近城':
+        return 'bg-emerald-50 text-emerald-600';
+      case '高信誉':
+        return 'bg-blue-50 text-blue-600';
+      case '价格优':
+        return 'bg-pink-50 text-pink-600';
+      default:
+        return 'bg-primary-50 text-primary-600';
+    }
+  };
+
+  const getChipIcon = (reason: string) => {
+    switch (reason) {
+      case '价格优':
+        return <span className="text-[9px]">💰</span>;
+      default:
+        return <Check size={8} />;
+    }
+  };
+
   return (
     <div className="space-y-3">
-      <div className="flex gap-2 overflow-x-auto scrollbar-hide -mx-1 px-1 pb-1">
-        {GROUP_TABS.map((tab) => {
-          const count =
-            tab.key === 'all'
-              ? recommendedSuppliers.length
-              : recommendedSuppliers.filter((s) => {
-                  if (tab.key === 'sameBrand') return s.sameBrand;
-                  if (tab.key === 'sameCategory') return s.sameCategory;
-                  if (tab.key === 'nearCity') return s.nearCity;
-                  if (tab.key === 'shipToday') return s.shipToday;
-                  if (tab.key === 'highReputation') return s.highReputation;
-                  return false;
-                }).length;
-          const isActive = activeGroup === tab.key;
-          return (
-            <button
-              key={tab.key}
-              onClick={() => setActiveGroup(tab.key)}
-              className={cn(
-                'flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-all flex items-center gap-1.5',
-                isActive
-                  ? 'bg-primary-500 text-white shadow-md shadow-primary-500/30'
-                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-              )}
-            >
-              {tab.label}
-              <span
+      <div className="flex items-center gap-2">
+        <div className="flex-1 flex gap-2 overflow-x-auto scrollbar-hide -mx-1 px-1 pb-1">
+          {GROUP_TABS.map((tab) => {
+            const count =
+              tab.key === 'all'
+                ? recommendedSuppliers.length
+                : recommendedSuppliers.filter((s) => {
+                    if (tab.key === 'sameBrand') return s.sameBrand;
+                    if (tab.key === 'sameCategory') return s.sameCategory;
+                    if (tab.key === 'nearCity') return s.nearCity;
+                    if (tab.key === 'shipToday') return s.shipToday;
+                    if (tab.key === 'highReputation') return s.highReputation;
+                    return false;
+                  }).length;
+            const isActive = activeGroup === tab.key;
+            return (
+              <button
+                key={tab.key}
+                onClick={() => setActiveGroup(tab.key)}
                 className={cn(
-                  'px-1.5 py-0.5 rounded-full text-[10px]',
-                  isActive ? 'bg-white/25' : 'bg-white'
+                  'flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-all flex items-center gap-1.5',
+                  isActive
+                    ? 'bg-primary-500 text-white shadow-md shadow-primary-500/30'
+                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
                 )}
               >
-                {count}
-              </span>
-            </button>
-          );
-        })}
+                {tab.label}
+                <span
+                  className={cn(
+                    'px-1.5 py-0.5 rounded-full text-[10px]',
+                    isActive ? 'bg-white/25' : 'bg-white'
+                  )}
+                >
+                  {count}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+        <button
+          type="button"
+          onClick={() => setWeightPanelOpen(true)}
+          className="flex-shrink-0 w-9 h-9 rounded-xl bg-gray-100 hover:bg-gray-200 active:scale-95 flex items-center justify-center transition-all"
+          title="推荐权重设置"
+        >
+          <Settings size={16} className="text-gray-600" />
+        </button>
       </div>
 
       {filteredSuppliers.length === 0 ? (
@@ -1204,19 +1607,13 @@ function RecommendedSuppliers({ post }: { post: UrgentPost }) {
                     <div className="mt-2 flex flex-wrap gap-1">
                       {matchReasons.slice(0, 3).map((reason, i) => (
                         <span
-                          key={i}
+                          key={`${reason}-${i}`}
                           className={cn(
                             'inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[10px] font-medium',
-                            reason === '当天发'
-                              ? 'bg-orange-50 text-orange-600'
-                              : reason === '同城' || reason === '近城'
-                                ? 'bg-blue-50 text-blue-600'
-                                : reason === '高信誉'
-                                  ? 'bg-amber-50 text-amber-600'
-                                  : 'bg-primary-50 text-primary-600'
+                            getChipStyle(reason)
                           )}
                         >
-                          <Check size={8} />
+                          {getChipIcon(reason)}
                           {reason}
                         </span>
                       ))}
@@ -1258,6 +1655,15 @@ function RecommendedSuppliers({ post }: { post: UrgentPost }) {
           );
         })
       )}
+
+      <WeightPanel
+        isOpen={weightPanelOpen}
+        onClose={() => setWeightPanelOpen(false)}
+        onApply={handleApplyWeights}
+        weightConfig={weightConfig}
+        setWeightConfig={setWeightConfig}
+        onReset={handleResetWeights}
+      />
 
       <RecommendReasonModal
         isOpen={!!reasonSupplier}

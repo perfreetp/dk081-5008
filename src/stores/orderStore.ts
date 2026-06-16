@@ -13,10 +13,12 @@ import {
   RelaySubOrderSnapshot,
   AfterSalesAlert,
   AfterSalesAlertType,
+  AfterSalesActionType,
 } from '../types';
 import { guaranteeOrders, users, urgentOrders, spotGoods } from '../mock/data';
 import { useUrgentStore } from './urgentStore';
 import { useAuthStore } from './authStore';
+import { DEFAULT_SHIPPING_FEE, calculateSubOrderAmounts } from '../components/business/RelayPanel';
 
 const findUser = (userId: string): User => {
   const user = users.find((u) => u.id === userId) || users[0];
@@ -294,8 +296,15 @@ interface OrderStoreState {
   ) => void;
 
   addTimelineItem: (orderId: string, item: Omit<OrderTimelineItem, 'timestamp'>) => void;
+  addAfterSalesAction: (
+    orderId: string,
+    actionType: AfterSalesActionType,
+    remark?: string,
+    images?: string[]
+  ) => void;
 
   createRelayParentOrder: (urgentPostId: string, confirmedRelayItemIds: string[]) => GuaranteeOrder;
+  cancelSubOrders: (parentOrderId: string, subOrderIds: string[]) => void;
 
   getAfterSalesAlerts: () => AfterSalesAlert[];
   getPendingInspectionOrders: () => GuaranteeOrder[];
@@ -385,8 +394,16 @@ export const useOrderStore = create<OrderStoreState>()(
       },
 
       getPendingInspectionOrders: () => {
+        const threeDaysMs = 3 * 24 * 60 * 60 * 1000;
         return get()
-          .orders.filter((o) => o.status === 'delivered')
+          .orders.filter((o) => {
+            if (o.status !== 'delivered') return false;
+            const deliveredItem = o.timeline.find((t) => t.status === 'delivered');
+            const deliveredTime = deliveredItem
+              ? new Date(deliveredItem.timestamp).getTime()
+              : new Date(o.createdAt).getTime();
+            return Date.now() - deliveredTime <= threeDaysMs;
+          })
           .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
       },
 
@@ -535,6 +552,7 @@ export const useOrderStore = create<OrderStoreState>()(
                     timestamp: new Date().toISOString(),
                     operatorId: o.buyerId,
                     remark: remark || '订单已取消',
+                    actionType: 'cancel_order',
                   },
                 ],
               };
@@ -655,6 +673,7 @@ export const useOrderStore = create<OrderStoreState>()(
           remark,
           confirmedAt: new Date().toISOString(),
         };
+        const resultLabel = result === 'fit' ? '完美适配' : result === 'wrong' ? '无法适配' : result === 'partial' ? '部分适配' : '待确认';
         set((state) => ({
           orders: state.orders.map((o) => {
             if (o.id === id) {
@@ -668,10 +687,9 @@ export const useOrderStore = create<OrderStoreState>()(
                     status: 'adapt_confirmed',
                     timestamp: new Date().toISOString(),
                     operatorId: o.buyerId,
-                    remark: `适配确认：${
-                      result === 'fit' ? '完美适配' : result === 'wrong' ? '无法适配' : result === 'partial' ? '部分适配' : '待确认'
-                    }，${remark}`,
+                    remark: `适配确认：${resultLabel}，${remark}`,
                     images,
+                    actionType: 'confirm_adaptation',
                   },
                 ],
               };
@@ -698,6 +716,7 @@ export const useOrderStore = create<OrderStoreState>()(
                     timestamp: new Date().toISOString(),
                     operatorId: o.buyerId,
                     remark: `订单已完成，尾款 ¥${Math.max(0, finalPay)} 已结算给卖家`,
+                    actionType: 'release_final',
                   },
                 ],
               };
@@ -735,6 +754,7 @@ export const useOrderStore = create<OrderStoreState>()(
                     operatorId: applicantId,
                     remark: `已发起争议申请：${reason}`,
                     images: evidenceImages,
+                    actionType: 'apply_dispute',
                   },
                 ],
               };
@@ -787,6 +807,7 @@ export const useOrderStore = create<OrderStoreState>()(
                     timestamp: new Date().toISOString(),
                     operatorId: 'system',
                     remark: `平台仲裁完成：${arbitratorRemark}`,
+                    actionType: 'arbitration_decision',
                   },
                 ],
               };
@@ -813,6 +834,45 @@ export const useOrderStore = create<OrderStoreState>()(
         }));
       },
 
+      addAfterSalesAction: (orderId, actionType, remark, images) => {
+        const authStore = useAuthStore.getState();
+        const operatorId = authStore.user?.id || 'system';
+        const actionLabels: Record<AfterSalesActionType, string> = {
+          confirm_adaptation: '确认适配',
+          apply_dispute: '申请争议',
+          contact_seller: '联系卖家',
+          contact_buyer: '联系买家',
+          submit_evidence: '提交举证',
+          arbitration_decision: '仲裁裁决',
+          release_final: '释放尾款',
+          freeze_funds: '冻结资金',
+          cancel_order: '取消订单',
+        };
+        const order = get().getOrderById(orderId);
+        if (!order) return;
+        set((state) => ({
+          orders: state.orders.map((o) => {
+            if (o.id === orderId) {
+              return {
+                ...o,
+                timeline: [
+                  ...o.timeline,
+                  {
+                    status: o.status,
+                    timestamp: new Date().toISOString(),
+                    operatorId,
+                    remark: remark || actionLabels[actionType],
+                    images,
+                    actionType,
+                  },
+                ],
+              };
+            }
+            return o;
+          }),
+        }));
+      },
+
       createRelayParentOrder: (urgentPostId, confirmedRelayItemIds) => {
         const urgentStore = useUrgentStore.getState();
         const authStore = useAuthStore.getState();
@@ -827,19 +887,21 @@ export const useOrderStore = create<OrderStoreState>()(
         const currentUser = authStore.user;
         if (!currentUser) throw new Error('用户未登录');
 
-        const DEFAULT_SHIPPING_FEE = 10;
         const subOrders: GuaranteeOrder[] = [];
         const subOrderIds: string[] = [];
         const relaySubOrderSnapshots: RelaySubOrderSnapshot[] = [];
+
         let totalAmount = 0;
-        let totalShippingFee = 0;
+        let totalDeposit = 0;
+        let totalGoods = 0;
+        let totalShipping = 0;
         let totalQty = 0;
 
         confirmedItems.forEach((item: RelayItem) => {
-          const amount = item.unitPrice * item.quantity;
-          const shippingFee = DEFAULT_SHIPPING_FEE;
-          const subTotalAmount = amount + shippingFee;
-          const depositAmount = Math.round(subTotalAmount * 0.3);
+          const { goodsAmount, shippingFee, totalAmount: subTotalAmount, depositAmount } = calculateSubOrderAmounts(
+            item.quantity,
+            item.unitPrice
+          );
 
           const subOrder: GuaranteeOrder = {
             id: 'go_' + generateId(),
@@ -881,8 +943,11 @@ export const useOrderStore = create<OrderStoreState>()(
 
           subOrders.push(subOrder);
           subOrderIds.push(subOrder.id);
+
           totalAmount += subTotalAmount;
-          totalShippingFee += shippingFee;
+          totalDeposit += depositAmount;
+          totalGoods += goodsAmount;
+          totalShipping += shippingFee;
           totalQty += item.quantity;
 
           relaySubOrderSnapshots.push({
@@ -893,7 +958,7 @@ export const useOrderStore = create<OrderStoreState>()(
             supplierCity: item.supplier.city,
             quantity: item.quantity,
             unitPrice: item.unitPrice,
-            amount,
+            amount: goodsAmount,
             shippingFee,
             totalAmount: subTotalAmount,
             depositAmount,
@@ -901,7 +966,6 @@ export const useOrderStore = create<OrderStoreState>()(
           });
         });
 
-        const parentDepositAmount = Math.round(totalAmount * 0.3);
         const parentOrder: GuaranteeOrder = {
           id: 'go_' + generateId(),
           orderNo: generateOrderNo(),
@@ -916,14 +980,14 @@ export const useOrderStore = create<OrderStoreState>()(
             partNumber: post.partNumber,
             carPlatform: post.carPlatform,
             quantity: totalQty,
-            unitPrice: totalAmount / totalQty,
+            unitPrice: totalQty > 0 ? totalGoods / totalQty : 0,
             conditionType: 'used',
             images: post.images,
           },
           totalAmount,
-          depositAmount: parentDepositAmount,
+          depositAmount: totalDeposit,
           finalAmount: totalAmount,
-          shippingFee: totalShippingFee,
+          shippingFee: totalShipping,
           status: 'pending_payment',
           timeline: [
             {
@@ -940,6 +1004,9 @@ export const useOrderStore = create<OrderStoreState>()(
             totalSuppliers: confirmedItems.length,
             totalQty,
             totalAmount,
+            totalDeposit,
+            totalGoods,
+            totalShipping,
           },
           relaySubOrderSnapshots,
           adaptConfirm: undefined,
@@ -956,6 +1023,101 @@ export const useOrderStore = create<OrderStoreState>()(
         });
 
         return parentOrder;
+      },
+
+      cancelSubOrders: (parentOrderId, subOrderIds) => {
+        if (subOrderIds.length === 0) return;
+
+        const state = get();
+        const parentOrder = state.orders.find((o) => o.id === parentOrderId);
+        if (!parentOrder || !parentOrder.isRelayParent) return;
+
+        const allSubOrderIds = parentOrder.relayOrderIds || parentOrder.relaySubOrders || [];
+        const cancelledAmount = 0;
+
+        set((s) => ({
+          orders: s.orders.map((o) => {
+            if (subOrderIds.includes(o.id)) {
+              return {
+                ...o,
+                status: 'cancelled' as OrderStatus,
+                timeline: [
+                  ...o.timeline,
+                  {
+                    status: 'cancelled' as OrderStatus,
+                    timestamp: new Date().toISOString(),
+                    operatorId: o.buyerId,
+                    remark: '批量取消子订单',
+                  },
+                ],
+              };
+            }
+
+            if (o.id === parentOrderId) {
+              const updatedSnapshots = (o.relaySubOrderSnapshots || []).map((snap) =>
+                subOrderIds.includes(snap.subOrderId)
+                  ? { ...snap, status: 'cancelled' as OrderStatus }
+                  : snap
+              );
+
+              const activeSnapshots = updatedSnapshots.filter(
+                (snap) => snap.status !== 'cancelled'
+              );
+
+              const newTotalAmount = activeSnapshots.reduce((sum, s) => sum + s.totalAmount, 0);
+              const newTotalDeposit = activeSnapshots.reduce((sum, s) => sum + s.depositAmount, 0);
+              const newTotalGoods = activeSnapshots.reduce((sum, s) => sum + s.amount, 0);
+              const newTotalShipping = activeSnapshots.reduce((sum, s) => sum + s.shippingFee, 0);
+              const newTotalQty = activeSnapshots.reduce((sum, s) => sum + s.quantity, 0);
+              const activeSuppliers = activeSnapshots.length;
+
+              const allCancelled = allSubOrderIds.every((sid) =>
+                subOrderIds.includes(sid)
+              );
+
+              const cancelledSnapshots = updatedSnapshots.filter((snap) =>
+                subOrderIds.includes(snap.subOrderId)
+              );
+              const cancelledSum = cancelledSnapshots.reduce((sum, s) => sum + s.totalAmount, 0);
+
+              const originalTotalAmount = o.relaySummary?.originalTotalAmount ?? o.relaySummary?.totalAmount ?? o.totalAmount;
+              const existingCancelledAmount = o.relaySummary?.cancelledAmount ?? 0;
+
+              const updatedTimeline = [
+                ...o.timeline,
+                {
+                  status: (allCancelled ? 'cancelled' : o.status) as OrderStatus,
+                  timestamp: new Date().toISOString(),
+                  operatorId: o.buyerId,
+                  remark: `${subOrderIds.length}条子订单批量取消`,
+                },
+              ];
+
+              return {
+                ...o,
+                status: allCancelled ? ('cancelled' as OrderStatus) : o.status,
+                totalAmount: newTotalAmount,
+                depositAmount: newTotalDeposit,
+                finalAmount: newTotalAmount,
+                shippingFee: newTotalShipping,
+                relaySubOrderSnapshots: updatedSnapshots,
+                relaySummary: {
+                  totalSuppliers: activeSuppliers,
+                  totalQty: newTotalQty,
+                  totalAmount: newTotalAmount,
+                  totalDeposit: newTotalDeposit,
+                  totalGoods: newTotalGoods,
+                  totalShipping: newTotalShipping,
+                  originalTotalAmount,
+                  cancelledAmount: existingCancelledAmount + cancelledSum,
+                },
+                timeline: updatedTimeline,
+              };
+            }
+
+            return o;
+          }),
+        }));
       },
 
       setSelectedOrder: (order) => {

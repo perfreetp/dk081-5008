@@ -1,7 +1,7 @@
 import { motion, type HTMLMotionProps } from "framer-motion";
 import { cn } from "@/lib/utils";
 
-type ButtonVariant = "primary" | "secondary" | "ghost" | "icon";
+type ButtonVariant = "primary" | "secondary" | "ghost" | "icon" | "danger";
 type ButtonSize = "sm" | "md" | "lg";
 
 interface ButtonProps extends Omit<HTMLMotionProps<"button">, "children"> {
@@ -36,6 +36,12 @@ const variantStyles: Record<ButtonVariant, string> = {
     "bg-white text-gray-700 border border-gray-200",
     "hover:bg-gray-50 active:bg-gray-100",
     "shadow-sm"
+  ),
+  danger: cn(
+    "bg-red-500 text-white",
+    "hover:bg-red-600 active:bg-red-700",
+    "shadow-sm shadow-red-500/20",
+    "disabled:bg-red-300 disabled:shadow-none"
   ),
 };
 

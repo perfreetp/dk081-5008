@@ -100,7 +100,7 @@ interface ArbitrationStep {
 export default function DisputePage() {
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
-  const { getOrderById, resolveDispute, initiateDispute, updateDispute } = useOrderStore();
+  const { getOrderById, resolveDispute, initiateDispute, updateDispute, addAfterSalesAction } = useOrderStore();
 
   const [order, setOrder] = useState<GuaranteeOrder | null>(null);
   const [isInitiating, setIsInitiating] = useState(false);
@@ -197,6 +197,13 @@ export default function DisputePage() {
     if (!order || !selectedReason) return;
     const reasonConfig = DISPUTE_REASONS.find((r) => r.key === selectedReason);
     initiateDispute(order.id, order.buyerId, reasonConfig?.label || '争议', evidenceImages);
+    addAfterSalesAction(
+      order.id,
+      'apply_dispute',
+      `${reasonConfig?.label || '争议'}：${buyerStatement || '无详细描述'}`,
+      evidenceImages.length > 0 ? evidenceImages : undefined
+    );
+    addAfterSalesAction(order.id, 'freeze_funds', `争议冻结资金 ¥${frozenAmount.toFixed(2)}`);
     const updated = getOrderById(order.id);
     if (updated) {
       setOrder(updated);
@@ -214,6 +221,11 @@ export default function DisputePage() {
       resolved_supplier: '经平台核实，卖家发货符合订单约定，配件不存在描述不符问题，支持卖家全额收款。',
       resolved_split: '鉴于双方均存在一定责任，经平台调解，双方各承担50%损失，冻结资金五五分账。',
     };
+    addAfterSalesAction(
+      order.id,
+      'arbitration_decision',
+      `仲裁结果：${option.label}（买家¥${buyerAmount}，卖家¥${supplierAmount}）。${remarks[selectedResolution]}`
+    );
     resolveDispute(order.id, selectedResolution, remarks[selectedResolution], buyerAmount, supplierAmount);
     const updated = getOrderById(order.id);
     if (updated) setOrder(updated);

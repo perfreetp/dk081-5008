@@ -30,6 +30,12 @@ import {
   Hash,
   Layers,
   Sparkles,
+  Gavel,
+  Paperclip,
+  Snowflake,
+  History,
+  Check,
+  Trash2,
 } from 'lucide-react';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import { useOrderStore } from '../../stores/orderStore';
@@ -40,6 +46,7 @@ import Button from '../../components/ui/Button';
 import Badge from '../../components/ui/Badge';
 import Card from '../../components/ui/Card';
 import { cn } from '../../lib/utils';
+import { formatTime } from '../../utils/format';
 import { AdaptConfirm, GuaranteeOrder, OrderStatus, Quote, RelaySubOrderSnapshot } from '../../types';
 
 const STATUS_HEADER_CONFIG: Record<
@@ -142,6 +149,9 @@ interface SubOrderItem {
   status: string;
   statusColor: string;
   statusBadgeVariant: 'default' | 'success' | 'warning' | 'danger' | 'info';
+  rawStatus: OrderStatus;
+  selectable: boolean;
+  isCancelled: boolean;
 }
 
 const SUBORDER_STATUS_CONFIG: Record<OrderStatus, { label: string; color: string; variant: 'default' | 'success' | 'warning' | 'danger' | 'info' }> = {
@@ -154,6 +164,88 @@ const SUBORDER_STATUS_CONFIG: Record<OrderStatus, { label: string; color: string
   completed: { label: '已完成', color: 'bg-emerald-100 text-emerald-600', variant: 'success' },
   disputing: { label: '争议中', color: 'bg-red-100 text-red-600', variant: 'danger' },
   cancelled: { label: '已取消', color: 'bg-gray-100 text-gray-600', variant: 'default' },
+};
+
+const AFTER_SALES_ACTION_CONFIG: Record<'confirm_adaptation' | 'apply_dispute' | 'contact_seller' | 'contact_buyer' | 'submit_evidence' | 'arbitration_decision' | 'release_final' | 'freeze_funds' | 'cancel_order', {
+  label: string;
+  iconBg: string;
+  iconColor: string;
+  icon: React.ReactNode;
+  borderColor: string;
+  textColor: string;
+}> = {
+  confirm_adaptation: {
+    label: '确认适配',
+    iconBg: 'bg-green-100',
+    iconColor: 'text-green-600',
+    icon: <CheckCircle2 size={14} />,
+    borderColor: 'border-green-200',
+    textColor: 'text-green-700',
+  },
+  apply_dispute: {
+    label: '申请争议',
+    iconBg: 'bg-red-100',
+    iconColor: 'text-red-600',
+    icon: <AlertTriangle size={14} />,
+    borderColor: 'border-red-200',
+    textColor: 'text-red-700',
+  },
+  contact_seller: {
+    label: '联系卖家',
+    iconBg: 'bg-blue-100',
+    iconColor: 'text-blue-600',
+    icon: <MessageCircle size={14} />,
+    borderColor: 'border-blue-200',
+    textColor: 'text-blue-700',
+  },
+  contact_buyer: {
+    label: '联系买家',
+    iconBg: 'bg-blue-100',
+    iconColor: 'text-blue-600',
+    icon: <MessageCircle size={14} />,
+    borderColor: 'border-blue-200',
+    textColor: 'text-blue-700',
+  },
+  submit_evidence: {
+    label: '提交举证',
+    iconBg: 'bg-purple-100',
+    iconColor: 'text-purple-600',
+    icon: <Paperclip size={14} />,
+    borderColor: 'border-purple-200',
+    textColor: 'text-purple-700',
+  },
+  arbitration_decision: {
+    label: '仲裁裁决',
+    iconBg: 'bg-amber-100',
+    iconColor: 'text-amber-600',
+    icon: <Gavel size={14} />,
+    borderColor: 'border-amber-200',
+    textColor: 'text-amber-700',
+  },
+  release_final: {
+    label: '释放尾款',
+    iconBg: 'bg-emerald-100',
+    iconColor: 'text-emerald-600',
+    icon: <Coins size={14} />,
+    borderColor: 'border-emerald-200',
+    textColor: 'text-emerald-700',
+  },
+  freeze_funds: {
+    label: '冻结资金',
+    iconBg: 'bg-red-100',
+    iconColor: 'text-red-600',
+    icon: <Snowflake size={14} />,
+    borderColor: 'border-red-200',
+    textColor: 'text-red-700',
+  },
+  cancel_order: {
+    label: '取消订单',
+    iconBg: 'bg-gray-100',
+    iconColor: 'text-gray-600',
+    icon: <XCircle size={14} />,
+    borderColor: 'border-gray-200',
+    textColor: 'text-gray-700',
+  },
 };
 
 function QuoteSnapshotCard({ quote, onClick }: { quote: Quote; onClick?: () => void }) {
@@ -265,18 +357,22 @@ export default function OrderDetail() {
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
   const location = useLocation();
-  const { getOrderById, confirmAdaptation, completeOrder, payDeposit } = useOrderStore();
+  const { getOrderById, confirmAdaptation, completeOrder, payDeposit, cancelSubOrders, cancelOrder, addAfterSalesAction } = useOrderStore();
   const { user } = useAuthStore();
 
   const [order, setOrder] = useState<GuaranteeOrder | null>(null);
   const [showAdaptModal, setShowAdaptModal] = useState(false);
   const [showPayModal, setShowPayModal] = useState(false);
+  const [showCancelSubModal, setShowCancelSubModal] = useState(false);
+  const [showCancelSingleModal, setShowCancelSingleModal] = useState(false);
   const [adaptResult, setAdaptResult] = useState<AdaptResult>('pending');
   const [adaptImages, setAdaptImages] = useState<string[]>([]);
   const [adaptRemark, setAdaptRemark] = useState('');
   const [expandedRelay, setExpandedRelay] = useState(true);
   const [highlightAdaptSection, setHighlightAdaptSection] = useState(false);
   const adaptSectionRef = useRef<HTMLDivElement | null>(null);
+  const [isBatchMode, setIsBatchMode] = useState(false);
+  const [selectedSubOrderIds, setSelectedSubOrderIds] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     if (id) {
@@ -317,6 +413,9 @@ export default function OrderDetail() {
       return snapshots.map((snap: RelaySubOrderSnapshot) => {
         const statusConfig = SUBORDER_STATUS_CONFIG[snap.status];
         const subOrder = getOrderById(snap.subOrderId);
+        const rawStatus = snap.status;
+        const isCancelled = rawStatus === 'cancelled';
+        const selectable = ['pending_payment', 'deposited'].includes(rawStatus);
         return {
           id: snap.subOrderId,
           supplierId: snap.supplierId,
@@ -334,6 +433,9 @@ export default function OrderDetail() {
           status: statusConfig.label,
           statusColor: statusConfig.color,
           statusBadgeVariant: statusConfig.variant,
+          rawStatus,
+          selectable,
+          isCancelled,
         };
       });
     }
@@ -341,11 +443,13 @@ export default function OrderDetail() {
     const relayIds = order.relayOrderIds || order.relaySubOrders || [];
     return relayIds.map((oid) => {
       const subOrder = getOrderById(oid);
-      const status = subOrder?.status || 'pending_payment';
-      const statusConfig = SUBORDER_STATUS_CONFIG[status];
+      const rawStatus = subOrder?.status || 'pending_payment';
+      const statusConfig = SUBORDER_STATUS_CONFIG[rawStatus];
       const qty = subOrder?.partInfo.quantity || 1;
       const unitPrice = subOrder?.partInfo.unitPrice || 0;
       const goodsAmount = qty * unitPrice;
+      const isCancelled = rawStatus === 'cancelled';
+      const selectable = ['pending_payment', 'deposited'].includes(rawStatus);
       return {
         id: oid,
         supplierId: subOrder?.supplierId || '',
@@ -363,9 +467,67 @@ export default function OrderDetail() {
         status: statusConfig.label,
         statusColor: statusConfig.color,
         statusBadgeVariant: statusConfig.variant,
+        rawStatus,
+        selectable,
+        isCancelled,
       };
     });
   }, [order, getOrderById]);
+
+  const selectableSubOrders = useMemo(() => subOrders.filter((s) => s.selectable), [subOrders]);
+  const cancelledCount = useMemo(() => subOrders.filter((s) => s.isCancelled).length, [subOrders]);
+  const activeCount = subOrders.length - cancelledCount;
+
+  const toggleSubOrderSelect = (subId: string) => {
+    setSelectedSubOrderIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(subId)) {
+        next.delete(subId);
+      } else {
+        next.add(subId);
+      }
+      return next;
+    });
+  };
+
+  const toggleSelectAllSubOrders = () => {
+    if (selectedSubOrderIds.size === selectableSubOrders.length) {
+      setSelectedSubOrderIds(new Set());
+    } else {
+      setSelectedSubOrderIds(new Set(selectableSubOrders.map((s) => s.id)));
+    }
+  };
+
+  const exitBatchMode = () => {
+    setIsBatchMode(false);
+    setSelectedSubOrderIds(new Set());
+  };
+
+  const handleBatchCancel = () => {
+    if (!order || selectedSubOrderIds.size === 0) return;
+    cancelSubOrders(order.id, Array.from(selectedSubOrderIds));
+    const updated = getOrderById(order.id);
+    if (updated) setOrder(updated);
+    setShowCancelSubModal(false);
+    exitBatchMode();
+  };
+
+  const handleSingleCancel = () => {
+    if (!order) return;
+    cancelOrder(order.id, '用户取消订单');
+    const updated = getOrderById(order.id);
+    if (updated) setOrder(updated);
+    setShowCancelSingleModal(false);
+  };
+
+  const selectedSubOrders = useMemo(
+    () => subOrders.filter((s) => selectedSubOrderIds.has(s.id)),
+    [subOrders, selectedSubOrderIds]
+  );
+  const selectedCancelTotal = useMemo(
+    () => selectedSubOrders.reduce((sum, s) => sum + s.totalAmount, 0),
+    [selectedSubOrders]
+  );
 
   const toggleSubOrderExpand = (id: string) => {
     setExpandedSubOrderIds((prev) => {
@@ -581,7 +743,22 @@ export default function OrderDetail() {
             initial={{ opacity: 0, y: -10 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.1 }}
+            className="space-y-3"
           >
+            {cancelledCount > 0 && (
+              <motion.div
+                initial={{ opacity: 0, y: -5 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="p-3 rounded-2xl bg-amber-50 border border-amber-200"
+              >
+                <div className="flex items-center gap-2">
+                  <AlertTriangle size={14} className="text-amber-600 flex-shrink-0" />
+                  <span className="text-xs font-medium text-amber-800">
+                    已取消 {cancelledCount} 家子订单，剩余 {activeCount} 家正常进行
+                  </span>
+                </div>
+              </motion.div>
+            )}
             <Card padding="md" className="bg-gradient-to-br from-indigo-50/50 to-violet-50/50 border-indigo-100">
               <div className="flex items-center gap-2 mb-3">
                 <div className="w-6 h-6 rounded-lg bg-gradient-to-br from-indigo-500 to-violet-500 flex items-center justify-center">
@@ -589,7 +766,7 @@ export default function OrderDetail() {
                 </div>
                 <h3 className="text-sm font-semibold text-gray-900">接龙汇总</h3>
               </div>
-              <div className="grid grid-cols-3 gap-3">
+              <div className="grid grid-cols-3 gap-3 mb-3">
                 <div className="text-center p-2.5 rounded-xl bg-white">
                   <div className="text-[10px] text-gray-400 mb-0.5">供应商数</div>
                   <div className="text-lg font-bold text-indigo-600">
@@ -611,6 +788,24 @@ export default function OrderDetail() {
                   </div>
                 </div>
               </div>
+              {order.relaySummary.cancelledAmount && order.relaySummary.cancelledAmount > 0 && (
+                <div className="p-2.5 rounded-xl bg-amber-50 border border-amber-100">
+                  <div className="flex items-center justify-between text-[11px]">
+                    <span className="text-gray-500">原总额</span>
+                    <span className="font-medium text-gray-700 line-through">
+                      ¥{order.relaySummary.originalTotalAmount}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between text-[11px] mt-1">
+                    <span className="text-red-500">取消</span>
+                    <span className="font-medium text-red-600">-¥{order.relaySummary.cancelledAmount}</span>
+                  </div>
+                  <div className="flex items-center justify-between text-[11px] mt-1 pt-1 border-t border-amber-200/50">
+                    <span className="text-emerald-600">现总额</span>
+                    <span className="font-bold text-emerald-700">¥{order.relaySummary.totalAmount}</span>
+                  </div>
+                </div>
+              )}
             </Card>
           </motion.div>
         )}
@@ -885,34 +1080,66 @@ export default function OrderDetail() {
 
         {order.isRelayParent && subOrders.length > 0 && (
           <Card padding="none" className="overflow-hidden">
-            <button
-              onClick={() => setExpandedRelay(!expandedRelay)}
-              className="w-full px-4 py-3.5 flex items-center justify-between bg-gradient-to-r from-indigo-50/80 to-violet-50/80 hover:from-indigo-50 hover:to-violet-50 transition-colors"
-            >
-              <div className="flex items-center gap-2">
-                <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-indigo-500 to-violet-500 flex items-center justify-center">
-                  <Users size={13} className="text-white" />
-                </div>
-                <div className="text-left">
-                  <div className="text-sm font-semibold text-gray-900 flex items-center gap-1.5">
-                    接龙子订单
-                    <Badge variant="info" size="sm">
-                      {subOrders.length}家
-                    </Badge>
+            <div className="px-4 py-3.5 flex items-center justify-between bg-gradient-to-r from-indigo-50/80 to-violet-50/80">
+              <div className="flex items-center gap-2 flex-1">
+                <button
+                  onClick={() => setExpandedRelay(!expandedRelay)}
+                  className="flex items-center gap-2 flex-1"
+                >
+                  <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-indigo-500 to-violet-500 flex items-center justify-center">
+                    <Users size={13} className="text-white" />
                   </div>
-                  <div className="text-[11px] text-gray-500">
-                    聚合 {order.partInfo.partName}
+                  <div className="text-left">
+                    <div className="text-sm font-semibold text-gray-900 flex items-center gap-1.5">
+                      接龙子订单
+                      <Badge variant="info" size="sm">
+                        {subOrders.length}家
+                      </Badge>
+                    </div>
+                    <div className="text-[11px] text-gray-500">
+                      聚合 {order.partInfo.partName}
+                    </div>
                   </div>
-                </div>
+                </button>
+                <motion.div
+                  animate={{ rotate: expandedRelay ? 180 : 0 }}
+                  transition={{ duration: 0.25 }}
+                  className="text-indigo-500"
+                >
+                  <ChevronRight size={18} />
+                </motion.div>
               </div>
-              <motion.div
-                animate={{ rotate: expandedRelay ? 180 : 0 }}
-                transition={{ duration: 0.25 }}
-                className="text-indigo-500"
-              >
-                <ChevronRight size={18} />
-              </motion.div>
-            </button>
+              {!isBatchMode ? (
+                selectableSubOrders.length > 0 && (
+                  <button
+                    onClick={() => setIsBatchMode(true)}
+                    className="ml-2 px-2.5 py-1.5 rounded-lg bg-white border border-indigo-200 text-indigo-600 text-[11px] font-medium hover:bg-indigo-50 transition-colors flex items-center gap-1"
+                  >
+                    批量操作
+                  </button>
+                )
+              ) : (
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] text-gray-600">
+                    已选 <span className="font-bold text-indigo-600">{selectedSubOrderIds.size}</span> 家 / 共 {selectableSubOrders.length} 家
+                  </span>
+                  <button
+                    onClick={toggleSelectAllSubOrders}
+                    className="px-2 py-1 rounded-md bg-white border border-gray-200 text-gray-600 text-[10px] font-medium hover:bg-gray-50"
+                  >
+                    {selectedSubOrderIds.size === selectableSubOrders.length && selectableSubOrders.length > 0
+                      ? '取消全选'
+                      : '全选'}
+                  </button>
+                  <button
+                    onClick={exitBatchMode}
+                    className="px-2 py-1 rounded-md bg-gray-100 text-gray-600 text-[10px] font-medium hover:bg-gray-200"
+                  >
+                    取消
+                  </button>
+                </div>
+              )}
+            </div>
 
             <AnimatePresence>
               {expandedRelay && (
@@ -926,33 +1153,84 @@ export default function OrderDetail() {
                   <div className="p-4 space-y-2.5">
                     {subOrders.map((sub, idx) => {
                       const isExpanded = expandedSubOrderIds.has(sub.id);
+                      const isSelected = selectedSubOrderIds.has(sub.id);
                       return (
                         <motion.div
                           key={sub.id}
                           initial={{ opacity: 0, x: -10 }}
                           animate={{ opacity: 1, x: 0 }}
                           transition={{ delay: idx * 0.05 }}
-                          className="rounded-xl bg-gray-50 overflow-hidden"
+                          className={cn(
+                            "rounded-xl overflow-hidden transition-all",
+                            sub.isCancelled ? "bg-gray-100 opacity-75" : "bg-gray-50"
+                          )}
                         >
                           <div
-                            className="flex items-center gap-3 p-3 hover:bg-gray-100 transition-colors cursor-pointer"
-                            onClick={() => toggleSubOrderExpand(sub.id)}
+                            className={cn(
+                              "flex items-center gap-3 p-3 transition-colors",
+                              !sub.isCancelled && !isBatchMode && "hover:bg-gray-100 cursor-pointer",
+                              sub.isCancelled && "cursor-not-allowed",
+                              isSelected && "bg-indigo-50 border border-indigo-100"
+                            )}
+                            onClick={() => {
+                              if (sub.isCancelled) return;
+                              if (isBatchMode && sub.selectable) {
+                                toggleSubOrderSelect(sub.id);
+                              } else if (!isBatchMode) {
+                                toggleSubOrderExpand(sub.id);
+                              }
+                            }}
                           >
+                            {isBatchMode && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (sub.selectable) {
+                                    toggleSubOrderSelect(sub.id);
+                                  }
+                                }}
+                                className={cn(
+                                  "mt-0.5 w-5 h-5 rounded-md border-2 flex items-center justify-center flex-shrink-0 transition-all",
+                                  sub.selectable
+                                    ? isSelected
+                                      ? "bg-indigo-500 border-indigo-500"
+                                      : "bg-white border-gray-300 hover:border-indigo-400 cursor-pointer"
+                                    : "bg-gray-200 border-gray-200 cursor-not-allowed"
+                                )}
+                                disabled={!sub.selectable}
+                              >
+                                {isSelected && sub.selectable && (
+                                  <Check size={12} className="text-white" strokeWidth={3} />
+                                )}
+                              </button>
+                            )}
                             <div className="flex-shrink-0 relative">
                               <img
                                 src={sub.supplierAvatar}
                                 alt={sub.supplierName}
-                                className="w-10 h-10 rounded-xl border border-gray-200"
+                                className={cn(
+                                  "w-10 h-10 rounded-xl border",
+                                  sub.isCancelled ? "border-gray-300 grayscale" : "border-gray-200"
+                                )}
                               />
                             </div>
                             <div className="flex-1 min-w-0">
                               <div className="flex items-center gap-2 mb-0.5">
-                                <span className="text-xs font-semibold text-gray-800 truncate">
+                                <span className={cn(
+                                  "text-xs font-semibold truncate",
+                                  sub.isCancelled ? "text-gray-500" : "text-gray-800"
+                                )}>
                                   {sub.supplierName}
                                 </span>
-                                <Badge variant={sub.statusBadgeVariant} size="sm">
-                                  {sub.status}
-                                </Badge>
+                                {sub.isCancelled ? (
+                                  <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-red-100 text-red-600 text-[9px] font-bold">
+                                    已取消
+                                  </span>
+                                ) : (
+                                  <Badge variant={sub.statusBadgeVariant} size="sm">
+                                    {sub.status}
+                                  </Badge>
+                                )}
                               </div>
                               <div className="flex items-center gap-2 text-[11px] text-gray-500 mb-1">
                                 <MapPin size={9} className="text-gray-400" />
@@ -966,19 +1244,26 @@ export default function OrderDetail() {
                             </div>
                             <div className="flex items-center gap-2">
                               <div className="text-right flex-shrink-0">
-                                <div className="text-sm font-bold text-accent-500">¥{sub.totalAmount}</div>
+                                <div className={cn(
+                                  "text-sm font-bold",
+                                  sub.isCancelled ? "text-gray-400 line-through" : "text-accent-500"
+                                )}>
+                                  ¥{sub.totalAmount}
+                                </div>
                               </div>
-                              <motion.div
-                                animate={{ rotate: isExpanded ? 180 : 0 }}
-                                transition={{ duration: 0.2 }}
-                              >
-                                <ChevronDown size={16} className="text-gray-400" />
-                              </motion.div>
+                              {!isBatchMode && !sub.isCancelled && (
+                                <motion.div
+                                  animate={{ rotate: isExpanded ? 180 : 0 }}
+                                  transition={{ duration: 0.2 }}
+                                >
+                                  <ChevronDown size={16} className="text-gray-400" />
+                                </motion.div>
+                              )}
                             </div>
                           </div>
 
                           <AnimatePresence initial={false}>
-                            {isExpanded && (
+                            {isExpanded && !sub.isCancelled && (
                               <motion.div
                                 initial={{ height: 0, opacity: 0 }}
                                 animate={{ height: 'auto', opacity: 1 }}
@@ -1054,6 +1339,22 @@ export default function OrderDetail() {
                 </motion.div>
               )}
             </AnimatePresence>
+
+            {isBatchMode && (
+              <div className="px-4 py-3 border-t border-gray-100 bg-gray-50">
+                <Button
+                  size="lg"
+                  variant="danger"
+                  block
+                  leftIcon={<Trash2 size={16} />}
+                  disabled={selectedSubOrderIds.size === 0}
+                  onClick={() => setShowCancelSubModal(true)}
+                  className={selectedSubOrderIds.size === 0 ? "opacity-50 cursor-not-allowed" : ""}
+                >
+                  批量取消选中子订单
+                </Button>
+              </div>
+            )}
           </Card>
         )}
 
@@ -1093,10 +1394,133 @@ export default function OrderDetail() {
             )}
           </Card>
         )}
+
+        {(order.timeline.filter(t => t.actionType).length > 0) && (
+          <Card padding="md">
+            <div className="flex items-center gap-2 mb-4">
+              <div className="w-7 h-7 rounded-xl bg-slate-100 flex items-center justify-center">
+                <History size={14} className="text-slate-600" />
+              </div>
+              <h3 className="text-sm font-semibold text-gray-900">处理记录</h3>
+              <span className="text-[10px] text-gray-400 ml-auto">
+                共 {order.timeline.filter(t => t.actionType).length} 条
+              </span>
+            </div>
+            <div className="relative pl-2">
+              {order.timeline
+                .filter(t => t.actionType)
+                .map((item, idx, arr) => {
+                  const config = item.actionType ? AFTER_SALES_ACTION_CONFIG[item.actionType] : null;
+                  if (!config) return null;
+                  const operatorLabel =
+                    item.operatorId === order.buyerId
+                      ? order.buyer.name
+                      : item.operatorId === order.supplierId
+                      ? order.supplier.name
+                      : '平台';
+                  return (
+                    <div key={idx} className="relative pb-4 last:pb-0">
+                      {idx !== arr.length - 1 && (
+                        <div className="absolute left-4 top-7 w-px h-[calc(100%-28px)] bg-gray-200" />
+                      )}
+                      <div className="flex gap-3">
+                        <div className={cn(
+                          'shrink-0 w-8 h-8 rounded-full flex items-center justify-center',
+                          config.iconBg
+                        )}>
+                          <div className={config.iconColor}>{config.icon}</div>
+                        </div>
+                        <div className="flex-1 min-w-0 pt-0.5">
+                          <div className="flex items-center justify-between gap-2 mb-0.5">
+                            <span className={cn('text-xs font-semibold', config.textColor)}>
+                              {config.label}
+                            </span>
+                            <span className="text-[10px] text-gray-400 whitespace-nowrap">
+                              {formatTime(item.timestamp)}
+                            </span>
+                          </div>
+                          <div className="text-[10px] text-gray-500 mb-1">
+                            操作人：<span className="text-gray-700">{operatorLabel}</span>
+                          </div>
+                          {item.remark && (
+                            <p className="text-xs text-gray-600 leading-relaxed mb-2">
+                              {item.remark}
+                            </p>
+                          )}
+                          {item.images && item.images.length > 0 && (
+                            <div className="flex gap-1.5 flex-wrap">
+                              {item.images.slice(0, 6).map((img, imgIdx) => (
+                                <div
+                                  key={imgIdx}
+                                  className="w-14 h-14 rounded-lg overflow-hidden bg-gray-100 border border-gray-100"
+                                >
+                                  <img
+                                    src={img}
+                                    alt={`凭证${imgIdx + 1}`}
+                                    className="w-full h-full object-cover"
+                                  />
+                                </div>
+                              ))}
+                              {item.images.length > 6 && (
+                                <div className="w-14 h-14 rounded-lg bg-gray-100 border border-gray-100 flex items-center justify-center text-[10px] text-gray-500">
+                                  +{item.images.length - 6}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+            </div>
+          </Card>
+        )}
       </div>
 
       <div className="fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-lg border-t border-gray-100 px-4 py-3 safe-area-bottom">
-        {order.status === 'pending_payment' && (
+        {order.status === 'pending_payment' && !order.isRelayParent && (
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-[10px] text-gray-400">待支付定金</div>
+              <div className="text-xl font-bold text-accent-500">¥{order.depositAmount}</div>
+            </div>
+            <div className="flex items-center gap-2.5">
+              <Button
+                size="lg"
+                variant="secondary"
+                onClick={() => setShowCancelSingleModal(true)}
+                className="border-red-300 text-red-500 hover:bg-red-50"
+              >
+                取消订单
+              </Button>
+              <Button size="lg" variant="primary" onClick={() => setShowPayModal(true)}>
+                立即支付定金
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {(order.status === 'deposited' || order.status === 'preparing') && !order.isRelayParent && (
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-[10px] text-gray-400">当前状态</div>
+              <div className="text-base font-bold text-gray-900">
+                {order.status === 'deposited' ? '定金已锁定' : '备货中'}
+              </div>
+            </div>
+            <Button
+              size="lg"
+              variant="secondary"
+              onClick={() => setShowCancelSingleModal(true)}
+              className="border-red-300 text-red-500 hover:bg-red-50"
+            >
+              取消订单
+            </Button>
+          </div>
+        )}
+
+        {order.status === 'pending_payment' && order.isRelayParent && (
           <div className="flex items-center justify-between">
             <div>
               <div className="text-[10px] text-gray-400">待支付定金</div>
@@ -1120,7 +1544,10 @@ export default function OrderDetail() {
               size="lg"
               variant="secondary"
               block
-              onClick={() => navigate(`/order/${order.id}/dispute`)}
+              onClick={() => {
+                if (id) addAfterSalesAction(id, 'apply_dispute', '买家发起争议申请');
+                navigate(`/order/${order.id}/dispute`);
+              }}
               leftIcon={<AlertTriangle size={16} />}
             >
               申请争议
@@ -1161,6 +1588,12 @@ export default function OrderDetail() {
               variant="secondary"
               block
               leftIcon={<MessageCircle size={16} />}
+              onClick={() => {
+                if (id && user) {
+                  const actionType = user.id === order.buyerId ? 'contact_seller' : 'contact_buyer';
+                  addAfterSalesAction(id, actionType, '争议期间沟通');
+                }
+              }}
             >
               联系平台
             </Button>
@@ -1441,6 +1874,193 @@ export default function OrderDetail() {
                 >
                   确认支付 ¥{order.depositAmount}
                 </Button>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showCancelSubModal && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowCancelSubModal(false)}
+              className="fixed inset-0 z-50 bg-black/50"
+            />
+            <motion.div
+              initial={{ y: '100%' }}
+              animate={{ y: 0 }}
+              exit={{ y: '100%' }}
+              transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+              className="fixed bottom-0 left-0 right-0 z-50 bg-white rounded-t-3xl max-h-[85vh] overflow-hidden"
+            >
+              <div className="sticky top-0 bg-white z-10 px-4 pt-3 pb-4 border-b border-gray-100">
+                <div className="w-12 h-1 bg-gray-200 rounded-full mx-auto mb-3" />
+                <div className="flex items-center justify-between">
+                  <h2 className="text-base font-bold text-red-600 flex items-center gap-1.5">
+                    <AlertTriangle size={16} />
+                    批量取消子订单
+                  </h2>
+                  <button
+                    onClick={() => setShowCancelSubModal(false)}
+                    className="w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center"
+                  >
+                    <X size={16} className="text-gray-500" />
+                  </button>
+                </div>
+              </div>
+
+              <div className="p-4 space-y-4 overflow-y-auto max-h-[calc(85vh-180px)]">
+                <div className="p-4 rounded-2xl bg-red-50 border border-red-100">
+                  <p className="text-sm font-medium text-red-800 mb-2">
+                    确认取消以下 {selectedSubOrders.length} 家子订单？
+                  </p>
+                  <p className="text-xs text-red-600 leading-relaxed">
+                    取消后定金将原路退回，操作不可撤销。
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  {selectedSubOrders.map((sub, idx) => (
+                    <div
+                      key={sub.id}
+                      className="flex items-center justify-between p-3 rounded-xl bg-gray-50"
+                    >
+                      <div className="flex items-center gap-2.5 flex-1 min-w-0">
+                        <img
+                          src={sub.supplierAvatar}
+                          alt={sub.supplierName}
+                          className="w-8 h-8 rounded-full flex-shrink-0"
+                        />
+                        <div className="flex-1 min-w-0">
+                          <span className="text-sm font-medium text-gray-800 truncate">
+                            {sub.supplierName}
+                          </span>
+                        </div>
+                      </div>
+                      <span className="text-sm font-bold text-gray-900">
+                        ¥{sub.totalAmount.toFixed(2)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="p-3 rounded-xl bg-gray-900 text-white">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-gray-400">合计取消</span>
+                    <span className="text-lg font-bold text-red-400">
+                      ¥{selectedCancelTotal.toFixed(2)}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="sticky bottom-0 bg-white border-t border-gray-100 p-4">
+                <div className="flex items-center gap-2.5">
+                  <Button
+                    size="lg"
+                    variant="secondary"
+                    block
+                    onClick={() => setShowCancelSubModal(false)}
+                  >
+                    再想想
+                  </Button>
+                  <Button
+                    size="lg"
+                    variant="danger"
+                    block
+                    onClick={handleBatchCancel}
+                    leftIcon={<Trash2 size={16} />}
+                  >
+                    残忍取消
+                  </Button>
+                </div>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showCancelSingleModal && (
+          <>
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowCancelSingleModal(false)}
+              className="fixed inset-0 z-50 bg-black/50"
+            />
+            <motion.div
+              initial={{ y: '100%' }}
+              animate={{ y: 0 }}
+              exit={{ y: '100%' }}
+              transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+              className="fixed bottom-0 left-0 right-0 z-50 bg-white rounded-t-3xl"
+            >
+              <div className="px-4 pt-3 pb-4 border-b border-gray-100">
+                <div className="w-12 h-1 bg-gray-200 rounded-full mx-auto mb-3" />
+                <div className="flex items-center justify-between">
+                  <h2 className="text-base font-bold text-red-600 flex items-center gap-1.5">
+                    <AlertTriangle size={16} />
+                    取消订单确认
+                  </h2>
+                  <button
+                    onClick={() => setShowCancelSingleModal(false)}
+                    className="w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center"
+                  >
+                    <X size={16} className="text-gray-500" />
+                  </button>
+                </div>
+              </div>
+
+              <div className="p-6 space-y-4">
+                <div className="p-4 rounded-2xl bg-red-50 border border-red-100">
+                  <p className="text-sm font-medium text-red-800 mb-2">
+                    确认取消此订单？
+                  </p>
+                  <p className="text-xs text-red-600 leading-relaxed">
+                    取消后定金将原路退回，操作不可撤销。
+                  </p>
+                </div>
+
+                <div className="p-3 rounded-xl bg-gray-900 text-white">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs text-gray-400">订单编号</span>
+                    <span className="text-xs font-mono text-gray-300">{order.orderNo}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-gray-400">取消金额</span>
+                    <span className="text-lg font-bold text-red-400">
+                      ¥{order.totalAmount.toFixed(2)}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="px-4 pb-4 pt-2">
+                <div className="flex items-center gap-2.5">
+                  <Button
+                    size="lg"
+                    variant="secondary"
+                    block
+                    onClick={() => setShowCancelSingleModal(false)}
+                  >
+                    再想想
+                  </Button>
+                  <Button
+                    size="lg"
+                    variant="danger"
+                    block
+                    onClick={handleSingleCancel}
+                    leftIcon={<Trash2 size={16} />}
+                  >
+                    确认取消
+                  </Button>
+                </div>
               </div>
             </motion.div>
           </>
