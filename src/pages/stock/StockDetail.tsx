@@ -24,6 +24,8 @@ import {
   Handshake,
 } from "lucide-react";
 import { useStockStore } from "@/stores/stockStore";
+import { useOrderStore } from "@/stores/orderStore";
+import { useAuthStore } from "@/stores/authStore";
 import { StockItem } from "@/types";
 import Card from "@/components/ui/Card";
 import Badge from "@/components/ui/Badge";
@@ -40,7 +42,9 @@ const conditionLabel: Record<string, { label: string; variant: "success" | "info
 export default function StockDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { getStockItemById } = useStockStore();
+  const { getStockItemById, updateStockQty } = useStockStore();
+  const orderStore = useOrderStore();
+  const { user } = useAuthStore();
 
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [isFavorited, setIsFavorited] = useState(false);
@@ -48,16 +52,41 @@ export default function StockDetail() {
   const [guaranteeStep, setGuaranteeStep] = useState<"confirm" | "locking" | "success">("confirm");
   const [lockingProgress, setLockingProgress] = useState(0);
   const [quantity, setQuantity] = useState(1);
+  const [createdOrderId, setCreatedOrderId] = useState<string | null>(null);
 
   const item: StockItem | undefined = id ? getStockItemById(id) : undefined;
 
   useEffect(() => {
-    if (guaranteeStep === "locking") {
+    if (guaranteeStep === "locking" && item && user) {
+      const totalAmount = (item.unitPrice + item.shippingFee) * quantity;
+      const depositAmount = Math.round((item.unitPrice + item.shippingFee) * quantity * 0.3);
       setLockingProgress(0);
       const interval = setInterval(() => {
         setLockingProgress((prev) => {
           if (prev >= 100) {
             clearInterval(interval);
+            const newOrder = orderStore.createOrder({
+              buyerId: user.id,
+              supplierId: item.supplierId,
+              sourceType: 'stock',
+              sourceId: item.id,
+              partInfo: {
+                partName: item.partName,
+                partNumber: item.partNumber,
+                carPlatform: item.carPlatform,
+                quantity: quantity,
+                unitPrice: item.unitPrice,
+                conditionType: item.conditionType,
+                images: item.images,
+              },
+              totalAmount: totalAmount,
+              depositAmount: depositAmount,
+              finalAmount: totalAmount,
+              shippingFee: item.shippingFee,
+              isRelayParent: false,
+            });
+            setCreatedOrderId(newOrder.id);
+            updateStockQty(item.id, -quantity);
             setTimeout(() => setGuaranteeStep("success"), 300);
             return 100;
           }
@@ -66,7 +95,7 @@ export default function StockDetail() {
       }, 50);
       return () => clearInterval(interval);
     }
-  }, [guaranteeStep]);
+  }, [guaranteeStep, item, user, quantity, orderStore, updateStockQty]);
 
   if (!item) {
     return (
@@ -107,6 +136,7 @@ export default function StockDetail() {
     setTimeout(() => {
       setGuaranteeStep("confirm");
       setLockingProgress(0);
+      setCreatedOrderId(null);
     }, 300);
   };
 
@@ -537,7 +567,7 @@ export default function StockDetail() {
                     <div className="flex items-center gap-3">
                       <motion.button
                         whileTap={{ scale: 0.9 }}
-                        onClick={() => setQuantity((q) => Math.max(1, q - 1))}
+                        onClick={() => setQuantity((q) => Math.min(item.stockQty, Math.max(1, q - 1)))}
                         className="flex h-10 w-10 items-center justify-center rounded-xl border border-gray-200 bg-white text-ink-600"
                       >
                         -
@@ -547,12 +577,12 @@ export default function StockDetail() {
                       </span>
                       <motion.button
                         whileTap={{ scale: 0.9 }}
-                        onClick={() => setQuantity((q) => Math.min(item.stockQty, q + 1))}
+                        onClick={() => setQuantity((q) => Math.min(item.stockQty, Math.max(1, q + 1)))}
                         className="flex h-10 w-10 items-center justify-center rounded-xl border border-gray-200 bg-white text-ink-600"
                       >
                         +
                       </motion.button>
-                      <span className="ml-auto text-xs text-ink-400">最多 {item.stockQty} 件</span>
+                      <span className="ml-auto text-xs text-ink-400">库存 {item.stockQty} 件</span>
                     </div>
                   </div>
 
@@ -706,7 +736,16 @@ export default function StockDetail() {
                     <Button variant="secondary" size="lg" block onClick={handleCloseModal}>
                       返回详情
                     </Button>
-                    <Button variant="primary" size="lg" block>
+                    <Button
+                      variant="primary"
+                      size="lg"
+                      block
+                      onClick={() => {
+                        if (createdOrderId) {
+                          navigate(`/order/${createdOrderId}`, { replace: true });
+                        }
+                      }}
+                    >
                       查看订单
                     </Button>
                   </div>
@@ -737,9 +776,16 @@ export default function StockDetail() {
           <Button variant="secondary" size="md" block>
             <span className="text-sm text-ink-500">单独购买</span>
           </Button>
-          <Button variant="primary" size="md" block onClick={handleInitiateGuarantee}>
+          <Button
+            variant="primary"
+            size="md"
+            block
+            onClick={handleInitiateGuarantee}
+            disabled={item.stockQty <= 0}
+            className={item.stockQty <= 0 ? "opacity-60 cursor-not-allowed" : ""}
+          >
             <Shield size={16} />
-            担保购买
+            {item.stockQty <= 0 ? "暂无库存" : "担保购买"}
           </Button>
         </div>
       </div>

@@ -27,18 +27,17 @@ import Chip from '../../components/ui/Chip';
 import Button from '../../components/ui/Button';
 import Badge from '../../components/ui/Badge';
 import { cn } from '../../lib/utils';
-import { addHours } from '../../utils/countdown';
 import { CarPlatform } from '../../types';
 
 const carBrands = ['宝马', '奔驰', '奥迪', '大众', '丰田', '本田', '日产', '特斯拉', '比亚迪', '保时捷', '路虎', '别克'];
 
 const deadlineOptions = [
-  { label: '2小时内', hours: 2, urgent: true },
-  { label: '6小时内', hours: 6, urgent: true },
-  { label: '12小时内', hours: 12, urgent: true },
-  { label: '24小时内', hours: 24, urgent: false },
-  { label: '48小时内', hours: 48, urgent: false },
-  { label: '72小时内', hours: 72, urgent: false },
+  { label: '30分钟内', minutes: 30, urgent: true },
+  { label: '2小时内', minutes: 120, urgent: true },
+  { label: '6小时内', minutes: 360, urgent: true },
+  { label: '12小时内', minutes: 720, urgent: true },
+  { label: '24小时内', minutes: 1440, urgent: false },
+  { label: '48小时内', minutes: 2880, urgent: false },
 ];
 
 interface PublishForm {
@@ -47,7 +46,7 @@ interface PublishForm {
   partNumber: string;
   quantity: number;
   description: string;
-  deadlineHours: number;
+  deadlineMinutes: number;
   images: string[];
 }
 
@@ -137,7 +136,7 @@ export default function UrgentPublish() {
     partNumber: '',
     quantity: 1,
     description: '',
-    deadlineHours: 24,
+    deadlineMinutes: 30,
     images: [],
   });
   const [selectedBrand, setSelectedBrand] = useState<string>('');
@@ -212,7 +211,7 @@ export default function UrgentPublish() {
 
     setIsSubmitting(true);
     try {
-      const expiresAt = addHours(new Date(), form.deadlineHours).toISOString();
+      const expiresAt = new Date(Date.now() + form.deadlineMinutes * 60 * 1000).toISOString();
       const newPost = createUrgentPost({
         publisherId: user.id,
         carPlatform: {
@@ -642,11 +641,11 @@ export default function UrgentPublish() {
                   <div className="grid grid-cols-3 gap-2">
                     {deadlineOptions.map((opt) => (
                       <button
-                        key={opt.hours}
-                        onClick={() => setForm((prev) => ({ ...prev, deadlineHours: opt.hours }))}
+                        key={opt.minutes}
+                        onClick={() => setForm((prev) => ({ ...prev, deadlineMinutes: opt.minutes }))}
                         className={cn(
                           "p-3 rounded-xl border-2 transition-all text-center",
-                          form.deadlineHours === opt.hours
+                          form.deadlineMinutes === opt.minutes
                             ? opt.urgent
                               ? "border-red-400 bg-red-50"
                               : "border-primary-400 bg-primary-50"
@@ -656,7 +655,7 @@ export default function UrgentPublish() {
                         <div
                           className={cn(
                             "text-sm font-semibold",
-                            form.deadlineHours === opt.hours
+                            form.deadlineMinutes === opt.minutes
                               ? opt.urgent
                                 ? "text-red-600"
                                 : "text-primary-600"

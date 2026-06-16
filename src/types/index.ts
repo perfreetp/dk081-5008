@@ -30,6 +30,7 @@ export interface UrgentPost {
   quantity: number;
   description: string;
   images: string[];
+  category: string;
   createdAt: string;
   expiresAt: string;
   status: 'active' | 'quoted' | 'locked' | 'completed' | 'expired';

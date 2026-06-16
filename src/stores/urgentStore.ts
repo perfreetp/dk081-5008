@@ -36,6 +36,27 @@ const parseCarModel = (carModel: string): CarPlatform => {
   };
 };
 
+const categoryMap: Record<string, string> = {
+  '照明系统': 'lighting',
+  '外观覆盖件': 'appearance',
+  '外观覆盖': 'appearance',
+  '机械传动': 'mechanical',
+  '变速箱系统': 'mechanical',
+  '转向系统': 'mechanical',
+  '电子电器': 'electronics',
+  '底盘悬挂': 'chassis',
+  '悬挂系统': 'chassis',
+  '制动系统': 'chassis',
+  '轮胎轮毂': 'chassis',
+  '发动机件': 'engine',
+  '发动机系统': 'engine',
+  '进排气系统': 'engine',
+  '燃油系统': 'engine',
+  '新能源系统': 'engine',
+  '空调系统': 'electronics',
+  '车身附件': 'appearance',
+};
+
 const transformUrgentOrders = (): UrgentPost[] => {
   return urgentOrders.map((order) => {
     const publisher = findUser(order.userId);
@@ -49,6 +70,7 @@ const transformUrgentOrders = (): UrgentPost[] => {
       quantity: order.quantity,
       description: order.description,
       images: order.images,
+      category: order.category,
       createdAt: order.createdAt,
       expiresAt: order.deadline,
       status:
@@ -109,7 +131,7 @@ interface UrgentStoreState {
   getUrgentPostsByPublisher: (publisherId: string) => UrgentPost[];
   getUrgentPostsByStatus: (status: UrgentPost['status']) => UrgentPost[];
 
-  createUrgentPost: (data: Omit<UrgentPost, 'id' | 'publisherId' | 'publisher' | 'createdAt' | 'status' | 'relayList' | 'quotes'> & { publisherId: string }) => UrgentPost;
+  createUrgentPost: (data: Omit<UrgentPost, 'id' | 'publisherId' | 'publisher' | 'createdAt' | 'status' | 'relayList' | 'quotes' | 'category'> & { publisherId: string; category?: string }) => UrgentPost;
   updateUrgentPost: (id: string, data: Partial<UrgentPost>) => void;
   deleteUrgentPost: (id: string) => void;
   setUrgentPostStatus: (id: string, status: UrgentPost['status']) => void;
@@ -179,6 +201,7 @@ export const useUrgentStore = create<UrgentStoreState>()(
           quantity: data.quantity,
           description: data.description,
           images: data.images,
+          category: data.category || '',
           createdAt: new Date().toISOString(),
           expiresAt: data.expiresAt,
           status: 'active',

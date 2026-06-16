@@ -25,6 +25,7 @@ import {
 import { useParams, useNavigate } from 'react-router-dom';
 import { useUrgentStore } from '../../stores/urgentStore';
 import { useAuthStore } from '../../stores/authStore';
+import { useOrderStore } from '../../stores/orderStore';
 import QuoteItem from '../../components/business/QuoteItem';
 import RelayPanel from '../../components/business/RelayPanel';
 import Card from '../../components/ui/Card';
@@ -182,8 +183,9 @@ function ImageCarousel({ images }: { images: string[] }) {
 export default function UrgentDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { getUrgentPostById, acceptQuote, setRelayItemStatus, isLoading, fetchUrgentPosts } = useUrgentStore();
+  const { getUrgentPostById, acceptQuote, setRelayItemStatus, createRelayItem, isLoading, fetchUrgentPosts } = useUrgentStore();
   const { user } = useAuthStore();
+  const orderStore = useOrderStore();
 
   const [activeTab, setActiveTab] = useState<TabType>('quotes');
   const [priceSort, setPriceSort] = useState<PriceSortType>('total');
@@ -562,7 +564,15 @@ export default function UrgentDetail() {
             >
               <RelayPanel
                 post={post}
-                onJoinRelay={() => alert('跳转接龙报价页面')}
+                onSubmitRelay={(qty, price) => {
+                  if (!user || !id) return;
+                  createRelayItem(id, {
+                    supplierId: user.id,
+                    quantity: qty,
+                    unitPrice: price,
+                    remark: '接龙补货',
+                  });
+                }}
                 onConfirmRelay={isPublisher ? handleConfirmRelay : undefined}
               />
             </motion.div>
@@ -708,8 +718,31 @@ export default function UrgentDetail() {
                   block
                   leftIcon={<Shield size={16} />}
                   onClick={() => {
-                    setShowGuaranteeModal(false);
-                    alert('担保订单创建成功！');
+                    if (selectedQuote && post && user) {
+                      const totalPrice = selectedQuote.totalPrice * post.quantity;
+                      const newOrder = orderStore.createOrder({
+                        buyerId: user.id,
+                        supplierId: selectedQuote.supplierId,
+                        sourceType: 'urgent',
+                        sourceId: post.id,
+                        partInfo: {
+                          partName: post.partName,
+                          partNumber: post.partNumber,
+                          carPlatform: post.carPlatform,
+                          quantity: post.quantity,
+                          unitPrice: selectedQuote.price,
+                          conditionType: selectedQuote.conditionType,
+                          images: post.images,
+                        },
+                        totalAmount: totalPrice,
+                        depositAmount: Math.round(totalPrice * 0.3),
+                        finalAmount: totalPrice,
+                        shippingFee: selectedQuote.shippingFee,
+                        isRelayParent: false,
+                      });
+                      setShowGuaranteeModal(false);
+                      navigate(`/order/${newOrder.id}`, { replace: true });
+                    }
                   }}
                 >
                   确认下单

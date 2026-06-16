@@ -62,6 +62,20 @@ export default function UrgentList() {
   const filteredPosts = useMemo(() => {
     let result = [...urgentPosts];
 
+    result = result.filter((p) => new Date(p.expiresAt).getTime() > Date.now());
+
+    if (activeCategory !== 'all') {
+      const categoryKeyMap: Record<string, string> = {
+        lighting: '照明系统',
+        appearance: '外观覆盖',
+        mechanical: '机械传动',
+        electronics: '电子电器',
+        chassis: '底盘悬挂',
+        engine: '发动机件',
+      };
+      result = result.filter((p) => p.category === categoryKeyMap[activeCategory] || p.category === activeCategory);
+    }
+
     if (searchQuery.trim()) {
       const query = searchQuery.toLowerCase();
       result = result.filter(
@@ -105,7 +119,7 @@ export default function UrgentList() {
     }
 
     return result;
-  }, [urgentPosts, searchQuery, activeSort, statusFilter, hasRelay, hasQuote, user]);
+  }, [urgentPosts, searchQuery, activeCategory, activeSort, statusFilter, hasRelay, hasQuote, user]);
 
   const activeFiltersCount =
     (statusFilter !== 'all' ? 1 : 0) + (hasRelay ? 1 : 0) + (hasQuote ? 1 : 0);

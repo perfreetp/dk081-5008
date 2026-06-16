@@ -1,5 +1,6 @@
+import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Link2, Check, Clock, Truck, Package, Plus, Users, X } from 'lucide-react';
+import { Link2, Check, Clock, Truck, Package, Plus, Users, X, ChevronDown, ChevronUp } from 'lucide-react';
 import { RelayItem, UrgentPost } from '../../types';
 import Card from '../ui/Card';
 import Chip from '../ui/Chip';
@@ -11,6 +12,7 @@ import { formatPrice, formatQuantity, formatTime } from '../../utils/format';
 interface RelayPanelProps {
   post: UrgentPost;
   onJoinRelay?: () => void;
+  onSubmitRelay?: (qty: number, price: number) => void;
   onConfirmRelay?: (relayId: string) => void;
 }
 
@@ -175,12 +177,34 @@ function RelayCard({
   );
 }
 
-export default function RelayPanel({ post, onJoinRelay, onConfirmRelay }: RelayPanelProps) {
+export default function RelayPanel({ post, onJoinRelay, onSubmitRelay, onConfirmRelay }: RelayPanelProps) {
+  const [showJoinPanel, setShowJoinPanel] = useState(false);
+  const [joinQty, setJoinQty] = useState(1);
+  const [joinPrice, setJoinPrice] = useState('');
+
   const relayList = post.relayList;
   const totalQuantity = relayList.reduce((sum, r) => sum + r.quantity, 0);
   const totalAmount = relayList.reduce((sum, r) => sum + r.unitPrice * r.quantity, 0);
   const confirmedCount = relayList.filter((r) => r.status !== 'intention').length;
   const minPrice = relayList.length > 0 ? Math.min(...relayList.map((r) => r.unitPrice)) : 0;
+
+  const handleSubmitRelay = () => {
+    const price = parseFloat(joinPrice);
+    if (joinQty > 0 && price > 0 && onSubmitRelay) {
+      onSubmitRelay(joinQty, price);
+      setJoinQty(1);
+      setJoinPrice('');
+      setShowJoinPanel(false);
+    }
+  };
+
+  const toggleJoinPanel = () => {
+    if (onSubmitRelay) {
+      setShowJoinPanel(!showJoinPanel);
+    } else if (onJoinRelay) {
+      onJoinRelay();
+    }
+  };
 
   return (
     <Card variant="outlined" padding="none" className="overflow-hidden">
@@ -198,7 +222,7 @@ export default function RelayPanel({ post, onJoinRelay, onConfirmRelay }: RelayP
                 </span>
               </div>
               <div className="text-xs text-gray-500">
-                {relayList.length}位供应商参与
+                接龙人数 {relayList.length} · 总数量 {formatQuantity(totalQuantity)} · 总金额 {formatPrice(totalAmount)}
               </div>
             </div>
           </div>
@@ -206,13 +230,72 @@ export default function RelayPanel({ post, onJoinRelay, onConfirmRelay }: RelayP
           <Button
             variant="primary"
             size="sm"
-            leftIcon={<Plus size={14} />}
-            onClick={onJoinRelay}
+            leftIcon={onSubmitRelay ? (showJoinPanel ? <ChevronUp size={14} /> : <Plus size={14} />) : <Plus size={14} />}
+            onClick={toggleJoinPanel}
             whileTap={{ scale: 0.95 }}
           >
-            加入接龙
+            {onSubmitRelay ? (showJoinPanel ? '收起' : '加入接龙') : '加入接龙'}
           </Button>
         </div>
+
+        <AnimatePresence>
+          {showJoinPanel && onSubmitRelay && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              className="overflow-hidden mb-4"
+            >
+              <div className="p-3 rounded-xl bg-gradient-to-r from-orange-50 to-amber-50 border border-orange-100 space-y-3">
+                <div className="flex items-center gap-3">
+                  <div className="flex-1">
+                    <label className="block text-[10px] text-orange-600 mb-1">数量</label>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => setJoinQty((q) => Math.max(1, q - 1))}
+                        className="w-8 h-8 rounded-lg bg-white border border-orange-200 text-orange-600 font-bold flex items-center justify-center"
+                      >
+                        -
+                      </button>
+                      <span className="w-10 text-center text-sm font-bold text-gray-900">{joinQty}</span>
+                      <button
+                        onClick={() => setJoinQty((q) => q + 1)}
+                        className="w-8 h-8 rounded-lg bg-white border border-orange-200 text-orange-600 font-bold flex items-center justify-center"
+                      >
+                        +
+                      </button>
+                    </div>
+                  </div>
+                  <div className="flex-1">
+                    <label className="block text-[10px] text-orange-600 mb-1">单价</label>
+                    <div className="flex items-center gap-1 px-3 h-8 rounded-lg bg-white border border-orange-200">
+                      <span className="text-orange-600 text-sm font-bold">¥</span>
+                      <input
+                        type="number"
+                        value={joinPrice}
+                        onChange={(e) => setJoinPrice(e.target.value)}
+                        placeholder="0.00"
+                        className="flex-1 w-full bg-transparent outline-none text-sm font-bold text-gray-900 placeholder:text-gray-300"
+                        step="0.01"
+                        min="0"
+                      />
+                    </div>
+                  </div>
+                </div>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  block
+                  onClick={handleSubmitRelay}
+                  disabled={joinQty <= 0 || !joinPrice || parseFloat(joinPrice) <= 0}
+                  className="bg-gradient-to-r from-orange-500 to-amber-500"
+                >
+                  提交接龙
+                </Button>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         {relayList.length > 0 && (
           <>
@@ -300,7 +383,7 @@ export default function RelayPanel({ post, onJoinRelay, onConfirmRelay }: RelayP
               variant="secondary"
               size="sm"
               leftIcon={<Plus size={14} />}
-              onClick={onJoinRelay}
+              onClick={toggleJoinPanel}
             >
               立即接龙
             </Button>
