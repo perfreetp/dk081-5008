@@ -36,6 +36,7 @@ export interface UrgentPost {
   status: 'active' | 'quoted' | 'locked' | 'completed' | 'expired';
   relayList: RelayItem[];
   quotes: Quote[];
+  acceptedQuoteId?: string;
 }
 
 export interface Quote {
@@ -109,9 +110,13 @@ export interface RelaySubOrderSnapshot {
   supplierId: string;
   supplierName: string;
   supplierAvatar: string;
+  supplierCity: string;
   quantity: number;
   unitPrice: number;
   amount: number;
+  shippingFee: number;
+  totalAmount: number;
+  depositAmount: number;
   status: OrderStatus;
 }
 
@@ -241,3 +246,15 @@ export interface OrderCardPayload {
 }
 
 export type SortType = 'price_asc' | 'price_desc' | 'distance' | 'reputation' | 'speed';
+
+export type AfterSalesAlertType = 'pending_inspection' | 'near_timeout' | 'in_dispute';
+
+export interface AfterSalesAlert {
+  id: string;
+  orderId: string;
+  type: AfterSalesAlertType;
+  title: string;
+  description: string;
+  deadlineAt?: string;
+  createdAt: string;
+}

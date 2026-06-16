@@ -8,6 +8,8 @@ import {
   X,
   ImagePlus,
   ChevronRight,
+  ChevronDown,
+  ChevronUp,
   Clock,
   Car,
   AlertTriangle,
@@ -24,10 +26,11 @@ import {
   MapPin,
   Truck,
   Check,
+  Info,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useVoiceInput } from '../../hooks/useVoiceInput';
-import { useUrgentStore } from '../../stores/urgentStore';
+import { useUrgentStore, normalizeCategory } from '../../stores/urgentStore';
 import { useAuthStore } from '../../stores/authStore';
 import { useStockStore } from '../../stores/stockStore';
 import { useMessageStore } from '../../stores/messageStore';
@@ -772,10 +775,152 @@ export default function UrgentPublish() {
   );
 }
 
+type GroupKey = 'all' | 'sameBrand' | 'sameCategory' | 'nearCity' | 'shipToday' | 'highReputation';
+
+const GROUP_TABS: { key: GroupKey; label: string }[] = [
+  { key: 'all', label: '全部' },
+  { key: 'sameBrand', label: '同品牌' },
+  { key: 'sameCategory', label: '同分类' },
+  { key: 'nearCity', label: '同城近城' },
+  { key: 'shipToday', label: '当天发车' },
+  { key: 'highReputation', label: '高信誉' },
+];
+
+interface MatchDetail {
+  key: string;
+  label: string;
+  matched: boolean;
+  score: number;
+}
+
 interface RecommendedSupplier {
   stockItem: StockItem;
   score: number;
+  totalScore: number;
   matchReasons: string[];
+  matchDetails: MatchDetail[];
+  sameBrand: boolean;
+  sameCategory: boolean;
+  nearCity: boolean;
+  shipToday: boolean;
+  highReputation: boolean;
+  hasStock: boolean;
+  isSameCity: boolean;
+  distanceKm: number;
+  reputationPercent: number;
+}
+
+function RecommendReasonModal({
+  isOpen,
+  onClose,
+  supplier,
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  supplier: RecommendedSupplier | null;
+}) {
+  if (!isOpen || !supplier) return null;
+
+  return (
+    <AnimatePresence>
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+        onClick={onClose}
+        className="fixed inset-0 z-50 bg-black/50"
+      />
+      <motion.div
+        initial={{ y: '100%' }}
+        animate={{ y: 0 }}
+        exit={{ y: '100%' }}
+        transition={{ type: 'spring', damping: 25, stiffness: 300 }}
+        className="fixed bottom-0 left-0 right-0 z-50 bg-white rounded-t-3xl max-h-[75vh] overflow-hidden"
+      >
+        <div className="sticky top-0 bg-white z-10 px-4 pt-3 pb-4 border-b border-gray-100">
+          <div className="w-12 h-1 bg-gray-200 rounded-full mx-auto mb-3" />
+          <div className="flex items-center justify-between">
+            <h2 className="text-base font-bold text-gray-900">为什么推荐</h2>
+            <button
+              onClick={onClose}
+              className="w-8 h-8 rounded-lg bg-gray-100 flex items-center justify-center"
+            >
+              <X size={16} className="text-gray-500" />
+            </button>
+          </div>
+          <div className="flex items-center gap-2 mt-2">
+            <img
+              src={supplier.stockItem.supplier.avatar}
+              alt={supplier.stockItem.supplier.name}
+              className="w-8 h-8 rounded-full"
+            />
+            <span className="text-sm font-medium text-gray-800">
+              {supplier.stockItem.supplier.name}
+            </span>
+            <div className="ml-auto text-right">
+              <div className="text-sm font-bold text-orange-500">
+                总得分 {supplier.score}/{supplier.totalScore}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="p-4 space-y-3 overflow-y-auto max-h-[calc(75vh-130px)]">
+          <div className="text-xs font-semibold text-gray-500 mb-1">匹配条件</div>
+          {supplier.matchDetails.map((detail) => (
+            <div
+              key={detail.key}
+              className={cn(
+                'flex items-center gap-3 p-3 rounded-xl border',
+                detail.matched
+                  ? 'bg-green-50 border-green-100'
+                  : 'bg-gray-50 border-gray-100'
+              )}
+            >
+              <div
+                className={cn(
+                  'w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0',
+                  detail.matched ? 'bg-green-500' : 'bg-gray-300'
+                )}
+              >
+                {detail.matched ? (
+                  <Check size={14} className="text-white" strokeWidth={3} />
+                ) : (
+                  <X size={12} className="text-white" />
+                )}
+              </div>
+              <div className="flex-1">
+                <div className="text-sm font-medium text-gray-800">{detail.label}</div>
+              </div>
+              <div
+                className={cn(
+                  'text-sm font-bold',
+                  detail.matched ? 'text-green-600' : 'text-gray-400'
+                )}
+              >
+                +{detail.score}分
+              </div>
+            </div>
+          ))}
+
+          <div className="mt-4 p-3 rounded-xl bg-blue-50 border border-blue-100">
+            <div className="flex items-center gap-2 mb-1">
+              <Info size={14} className="text-blue-500" />
+              <span className="text-xs font-semibold text-blue-700">匹配来源说明</span>
+            </div>
+            <ul className="text-[11px] text-blue-600/80 space-y-1 ml-5">
+              <li>· 同品牌：供应商库存配件品牌与急件需求品牌一致</li>
+              <li>· 同分类：配件分类归一化后与急件分类一致</li>
+              <li>· 同城近城：同一城市或距离小于50公里</li>
+              <li>· 当天发车：供应商支持当天发货</li>
+              <li>· 高信誉：供应商星级评分≥4.7分</li>
+              <li>· 有现货：库存数量大于0</li>
+            </ul>
+          </div>
+        </div>
+      </motion.div>
+    </AnimatePresence>
+  );
 }
 
 function RecommendedSuppliers({ post }: { post: UrgentPost }) {
@@ -783,6 +928,11 @@ function RecommendedSuppliers({ post }: { post: UrgentPost }) {
   const { stockItems } = useStockStore();
   const { createSessionByParticipants, sendMessage } = useMessageStore();
   const { user } = useAuthStore();
+  const [activeGroup, setActiveGroup] = useState<GroupKey>('all');
+  const [reasonSupplier, setReasonSupplier] = useState<RecommendedSupplier | null>(null);
+
+  const postCategoryNorm = normalizeCategory(post.category);
+  const publisherCity = post.publisher?.city || '';
 
   const recommendedSuppliers = useMemo(() => {
     const suppliers: RecommendedSupplier[] = [];
@@ -792,40 +942,88 @@ function RecommendedSuppliers({ post }: { post: UrgentPost }) {
       if (seenSupplierIds.has(stockItem.supplierId)) return;
       if (user && stockItem.supplierId === user.id) return;
 
+      const stockCategoryNorm = normalizeCategory(
+        stockItem.tags.find((t) => t !== '热销' && t !== '可议价') || ''
+      );
+      const isSameCity = stockItem.sourceCity === publisherCity || stockItem.supplier.city === publisherCity;
+      const distanceKm = isSameCity ? Math.floor(Math.random() * 20) : Math.floor(Math.random() * 500) + 30;
+      const isNearCity = isSameCity || distanceKm < 50;
+
+      const sameBrand = stockItem.carPlatform.brand === post.carPlatform.brand;
+      const sameCategory = stockCategoryNorm === postCategoryNorm && postCategoryNorm !== '';
+      const hasStock = stockItem.stockQty > 0;
+      const shipToday = stockItem.canShipToday;
+      const starRating = stockItem.supplier.reputation.starRating;
+      const highReputation = starRating >= 4.7;
+      const nearCity = isNearCity;
+
+      const matchDetails: MatchDetail[] = [
+        { key: 'sameBrand', label: '同品牌匹配', matched: sameBrand, score: 30 },
+        { key: 'sameCategory', label: '同分类匹配', matched: sameCategory, score: 20 },
+        { key: 'nearCity', label: isSameCity ? '同城供应商' : '近城供应商(<50km)', matched: nearCity, score: 15 },
+        { key: 'shipToday', label: '当天可发车', matched: shipToday, score: 25 },
+        { key: 'highReputation', label: '高信誉商家(≥4.7星)', matched: highReputation, score: 20 },
+        { key: 'hasStock', label: '有现货库存', matched: hasStock, score: 10 },
+      ];
+
       let score = 0;
       const matchReasons: string[] = [];
+      matchDetails.forEach((d) => {
+        if (d.matched) {
+          score += d.score;
+          if (d.key === 'sameBrand') matchReasons.push('同品牌');
+          if (d.key === 'sameCategory') matchReasons.push('同分类');
+          if (d.key === 'nearCity') matchReasons.push(isSameCity ? '同城' : '近城');
+          if (d.key === 'shipToday') matchReasons.push('当天发');
+          if (d.key === 'highReputation') matchReasons.push('高信誉');
+          if (d.key === 'hasStock') matchReasons.push('有现货');
+        }
+      });
 
-      if (stockItem.carPlatform.brand === post.carPlatform.brand) {
-        score += 30;
-        matchReasons.push('同品牌');
-      }
-
-      if (stockItem.tags.includes(post.category) || stockItem.partName.includes(post.partName)) {
-        score += 20;
-        matchReasons.push('同分类');
-      }
-
-      if (stockItem.stockQty > 0) {
-        score += 10;
-        matchReasons.push('有现货');
-      }
-
-      if (stockItem.canShipToday) {
-        score += 50;
-        matchReasons.push('当天可发');
-      }
-
-      const reputationScore = Math.min(30, stockItem.supplier.reputation.starRating * 6);
-      score += reputationScore;
+      const totalScore = matchDetails.reduce((s, d) => s + d.score, 0);
+      const reputationPercent = Math.max(1, Math.round((5 - starRating + 0.1) * 20 + 1));
 
       if (score > 0) {
         seenSupplierIds.add(stockItem.supplierId);
-        suppliers.push({ stockItem, score, matchReasons });
+        suppliers.push({
+          stockItem,
+          score,
+          totalScore,
+          matchReasons,
+          matchDetails,
+          sameBrand,
+          sameCategory,
+          nearCity,
+          shipToday,
+          highReputation,
+          hasStock,
+          isSameCity,
+          distanceKm,
+          reputationPercent,
+        });
       }
     });
 
-    return suppliers.sort((a, b) => b.score - a.score).slice(0, 6);
-  }, [stockItems, post, user]);
+    return suppliers.sort((a, b) => b.score - a.score).slice(0, 8);
+  }, [stockItems, post, user, postCategoryNorm, publisherCity]);
+
+  const filteredSuppliers = useMemo(() => {
+    switch (activeGroup) {
+      case 'sameBrand':
+        return recommendedSuppliers.filter((s) => s.sameBrand);
+      case 'sameCategory':
+        return recommendedSuppliers.filter((s) => s.sameCategory);
+      case 'nearCity':
+        return recommendedSuppliers.filter((s) => s.nearCity);
+      case 'shipToday':
+        return recommendedSuppliers.filter((s) => s.shipToday);
+      case 'highReputation':
+        return recommendedSuppliers.filter((s) => s.highReputation);
+      case 'all':
+      default:
+        return recommendedSuppliers;
+    }
+  }, [recommendedSuppliers, activeGroup]);
 
   const handleChat = (supplierId: string) => {
     if (!user) return;
@@ -879,106 +1077,193 @@ function RecommendedSuppliers({ post }: { post: UrgentPost }) {
 
   return (
     <div className="space-y-3">
-      {recommendedSuppliers.map(({ stockItem, matchReasons }, index) => (
-        <motion.div
-          key={stockItem.id}
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: index * 0.1 }}
-        >
-          <Card variant="outlined" padding="md">
-            <div className="flex gap-3">
-              <div className="relative">
-                <img
-                  src={stockItem.supplier.avatar}
-                  alt={stockItem.supplier.name}
-                  className="w-12 h-12 rounded-full object-cover border-2 border-white shadow-sm"
-                />
-                {stockItem.supplier.verified && (
-                  <div className="absolute -bottom-0.5 -right-0.5 w-4 h-4 bg-green-500 rounded-full flex items-center justify-center">
-                    <Check size={10} className="text-white" />
-                  </div>
+      <div className="flex gap-2 overflow-x-auto scrollbar-hide -mx-1 px-1 pb-1">
+        {GROUP_TABS.map((tab) => {
+          const count =
+            tab.key === 'all'
+              ? recommendedSuppliers.length
+              : recommendedSuppliers.filter((s) => {
+                  if (tab.key === 'sameBrand') return s.sameBrand;
+                  if (tab.key === 'sameCategory') return s.sameCategory;
+                  if (tab.key === 'nearCity') return s.nearCity;
+                  if (tab.key === 'shipToday') return s.shipToday;
+                  if (tab.key === 'highReputation') return s.highReputation;
+                  return false;
+                }).length;
+          const isActive = activeGroup === tab.key;
+          return (
+            <button
+              key={tab.key}
+              onClick={() => setActiveGroup(tab.key)}
+              className={cn(
+                'flex-shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-all flex items-center gap-1.5',
+                isActive
+                  ? 'bg-primary-500 text-white shadow-md shadow-primary-500/30'
+                  : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+              )}
+            >
+              {tab.label}
+              <span
+                className={cn(
+                  'px-1.5 py-0.5 rounded-full text-[10px]',
+                  isActive ? 'bg-white/25' : 'bg-white'
                 )}
-              </div>
+              >
+                {count}
+              </span>
+            </button>
+          );
+        })}
+      </div>
 
-              <div className="flex-1 min-w-0">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-sm font-semibold text-gray-900 truncate">
-                        {stockItem.supplier.name}
-                      </span>
-                      {stockItem.supplier.certificationBadges.map((badge, i) => (
-                        <Badge key={i} variant="success" size="sm">
-                          {badge}
-                        </Badge>
-                      ))}
-                    </div>
-                    <div className="flex items-center gap-1.5 mt-0.5">
-                      <MapPin size={10} className="text-gray-400" />
-                      <span className="text-xs text-gray-500">{stockItem.supplier.city}</span>
-                      <span className="text-gray-300">·</span>
-                      <div className="flex items-center gap-0.5">
-                        {renderStars(stockItem.supplier.reputation.starRating)}
-                        <span className="text-xs text-gray-500 ml-0.5">
-                          {stockItem.supplier.reputation.starRating.toFixed(1)}
-                        </span>
+      {filteredSuppliers.length === 0 ? (
+        <div className="text-center py-6">
+          <p className="text-sm text-gray-400">该分组下暂无匹配供应商</p>
+        </div>
+      ) : (
+        filteredSuppliers.map((supplier, index) => {
+          const { stockItem, matchReasons, score, totalScore, isSameCity, distanceKm, reputationPercent } = supplier;
+          return (
+            <motion.div
+              key={stockItem.id}
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: index * 0.05 }}
+            >
+              <Card variant="outlined" padding="md" className="relative">
+                <button
+                  onClick={() => setReasonSupplier(supplier)}
+                  className="absolute top-3 right-3 flex items-center gap-1 px-2 py-1 rounded-full bg-blue-50 hover:bg-blue-100 transition-colors z-10"
+                >
+                  <Info size={12} className="text-blue-500" />
+                  <span className="text-[10px] font-medium text-blue-600">为什么推荐</span>
+                </button>
+
+                <div className="flex gap-3 pr-20">
+                  <div className="relative">
+                    <img
+                      src={stockItem.supplier.avatar}
+                      alt={stockItem.supplier.name}
+                      className="w-12 h-12 rounded-full object-cover border-2 border-white shadow-sm"
+                    />
+                    {stockItem.supplier.verified && (
+                      <div className="absolute -bottom-0.5 -right-0.5 w-4 h-4 bg-green-500 rounded-full flex items-center justify-center">
+                        <Check size={10} className="text-white" />
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="text-sm font-semibold text-gray-900 truncate">
+                            {stockItem.supplier.name}
+                          </span>
+                          {isSameCity ? (
+                            <Badge variant="success" size="sm">
+                              同城
+                            </Badge>
+                          ) : distanceKm < 50 ? (
+                            <Badge variant="info" size="sm">
+                              {distanceKm}km
+                            </Badge>
+                          ) : null}
+                          {stockItem.supplier.certificationBadges.slice(0, 1).map((badge, i) => (
+                            <Badge key={i} variant="success" size="sm">
+                              {badge}
+                            </Badge>
+                          ))}
+                        </div>
+                        <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                          <MapPin size={10} className="text-gray-400" />
+                          <span className="text-xs text-gray-500">{stockItem.supplier.city}</span>
+                          <span className="text-gray-300">·</span>
+                          <div className="flex items-center gap-0.5">
+                            {renderStars(stockItem.supplier.reputation.starRating)}
+                            <span className="text-xs text-gray-500 ml-0.5">
+                              {stockItem.supplier.reputation.starRating.toFixed(1)}
+                            </span>
+                          </div>
+                          <span className="text-gray-300">·</span>
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-600 font-medium">
+                            信誉前{reputationPercent}%
+                          </span>
+                        </div>
+                      </div>
+                      <div className="text-right flex-shrink-0">
+                        <div className="text-lg font-bold text-red-500">
+                          ¥{stockItem.unitPrice}
+                        </div>
+                        <div className="text-[10px] text-gray-400">
+                          库存 {stockItem.stockQty} 件
+                        </div>
                       </div>
                     </div>
-                  </div>
-                  <div className="text-right flex-shrink-0">
-                    <div className="text-lg font-bold text-red-500">
-                      ¥{stockItem.unitPrice}
-                    </div>
-                    <div className="text-[10px] text-gray-400">
-                      库存 {stockItem.stockQty} 件
-                    </div>
-                  </div>
-                </div>
 
-                <div className="mt-2 p-2 bg-gray-50 rounded-lg">
-                  <div className="text-xs text-gray-700">
-                    匹配配件：<span className="font-medium">{stockItem.partName}</span>
-                  </div>
-                  <div className="flex flex-wrap gap-1 mt-1.5">
-                    {matchReasons.map((reason, i) => (
-                      <Chip
-                        key={i}
-                        variant={reason === '当天可发' ? 'warning' : 'primary'}
+                    <div className="mt-2 flex flex-wrap gap-1">
+                      {matchReasons.slice(0, 3).map((reason, i) => (
+                        <span
+                          key={i}
+                          className={cn(
+                            'inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[10px] font-medium',
+                            reason === '当天发'
+                              ? 'bg-orange-50 text-orange-600'
+                              : reason === '同城' || reason === '近城'
+                                ? 'bg-blue-50 text-blue-600'
+                                : reason === '高信誉'
+                                  ? 'bg-amber-50 text-amber-600'
+                                  : 'bg-primary-50 text-primary-600'
+                          )}
+                        >
+                          <Check size={8} />
+                          {reason}
+                        </span>
+                      ))}
+                      <span className="inline-flex items-center px-1.5 py-0.5 rounded-md text-[10px] font-medium bg-gray-50 text-gray-500">
+                        {score}分
+                      </span>
+                    </div>
+
+                    <div className="mt-2 p-2 bg-gray-50 rounded-lg">
+                      <div className="text-xs text-gray-700">
+                        匹配配件：<span className="font-medium">{stockItem.partName}</span>
+                      </div>
+                    </div>
+
+                    <div className="flex gap-2 mt-3">
+                      <Button
+                        variant="secondary"
                         size="sm"
+                        block
+                        leftIcon={<MessageCircle size={14} />}
+                        onClick={() => handleChat(stockItem.supplierId)}
                       >
-                        {reason === '当天可发' && <Truck size={8} className="mr-0.5" />}
-                        {reason}
-                      </Chip>
-                    ))}
+                        立即聊天
+                      </Button>
+                      <Button
+                        variant="primary"
+                        size="sm"
+                        block
+                        leftIcon={<HandCoins size={14} />}
+                        onClick={() => handleInviteQuote(stockItem.supplierId, stockItem.supplier.name)}
+                      >
+                        邀请报价
+                      </Button>
+                    </div>
                   </div>
                 </div>
+              </Card>
+            </motion.div>
+          );
+        })
+      )}
 
-                <div className="flex gap-2 mt-3">
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    block
-                    leftIcon={<MessageCircle size={14} />}
-                    onClick={() => handleChat(stockItem.supplierId)}
-                  >
-                    立即聊天
-                  </Button>
-                  <Button
-                    variant="primary"
-                    size="sm"
-                    block
-                    leftIcon={<HandCoins size={14} />}
-                    onClick={() => handleInviteQuote(stockItem.supplierId, stockItem.supplier.name)}
-                  >
-                    邀请报价
-                  </Button>
-                </div>
-              </div>
-            </div>
-          </Card>
-        </motion.div>
-      ))}
+      <RecommendReasonModal
+        isOpen={!!reasonSupplier}
+        onClose={() => setReasonSupplier(null)}
+        supplier={reasonSupplier}
+      />
     </div>
   );
 }

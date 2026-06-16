@@ -1,5 +1,5 @@
 import { motion } from 'framer-motion';
-import { MapPin, Truck, Clock, ShieldCheck, Star, MessageCircle, ChevronRight } from 'lucide-react';
+import { MapPin, Truck, Clock, ShieldCheck, Star, MessageCircle, ChevronRight, CheckCircle2 } from 'lucide-react';
 import { Quote } from '../../types';
 import Card from '../ui/Card';
 import Chip from '../ui/Chip';
@@ -46,15 +46,19 @@ export default function QuoteItem({
         padding="none"
         className={cn(
           "overflow-hidden relative",
-          isAccepted && "ring-2 ring-primary-500 bg-primary-50/30"
+          isAccepted && "ring-2 ring-orange-500 bg-gradient-to-br from-orange-50/80 to-amber-50/60"
         )}
       >
         {isAccepted && (
-          <div className="absolute top-0 right-0">
-            <Badge variant="success" size="md" className="rounded-none rounded-bl-xl">
-              已采纳
-            </Badge>
-          </div>
+          <>
+            <div className="absolute left-0 top-0 bottom-0 w-1 bg-gradient-to-b from-orange-500 to-amber-500" />
+            <div className="absolute top-3 right-3">
+              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-gradient-to-r from-orange-500 to-amber-500 text-white text-[11px] font-bold shadow-sm shadow-orange-500/20">
+                <CheckCircle2 size={12} />
+                已采纳
+              </span>
+            </div>
+          </>
         )}
 
         <div className="p-4">

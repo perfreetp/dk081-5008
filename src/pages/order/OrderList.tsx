@@ -11,6 +11,7 @@ import {
   AlertTriangle,
   Truck,
   Package,
+  PackageSearch,
   Users,
   ArrowRightLeft,
   ChevronDown,
@@ -20,6 +21,8 @@ import {
   Link2,
   Lock,
   Sparkles,
+  Phone,
+  MessageCircle,
 } from 'lucide-react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useOrderStore } from '../../stores/orderStore';
@@ -33,6 +36,7 @@ import { GuaranteeOrder, OrderStatus } from '../../types';
 
 type TabKey = 'pending_payment' | 'pending_ship' | 'pending_confirm' | 'completed' | 'dispute';
 type SourceType = 'all' | 'urgent' | 'stock' | 'relay';
+type AfterSalesFilter = 'none' | 'pending_inspection' | 'near_timeout' | 'in_dispute';
 
 interface TabConfig {
   key: TabKey;
@@ -153,15 +157,44 @@ function OrderCard({
   index,
   onClick,
   isHighlighted = false,
+  afterSalesFilter = 'none',
+  onQuickAction,
 }: {
   order: GuaranteeOrder;
   index: number;
   onClick: () => void;
   isHighlighted?: boolean;
+  afterSalesFilter?: AfterSalesFilter;
+  onQuickAction?: (action: string, orderId: string) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
+  const [showTimeoutBar, setShowTimeoutBar] = useState(false);
   const badge = STATUS_BADGE[order.status];
   const isBuyer = true;
+
+  const getAlertType = (): AfterSalesFilter => {
+    if (order.status === 'disputing') return 'in_dispute';
+    if (order.status === 'delivered') {
+      const threeDaysMs = 3 * 24 * 60 * 60 * 1000;
+      const deliveredItem = order.timeline.find((t) => t.status === 'delivered');
+      const deliveredTime = deliveredItem
+        ? new Date(deliveredItem.timestamp).getTime()
+        : new Date(order.createdAt).getTime();
+      if (Date.now() - deliveredTime > threeDaysMs) {
+        return 'near_timeout';
+      }
+      return 'pending_inspection';
+    }
+    return 'none';
+  };
+
+  const alertType = getAlertType();
+
+  const alertBadgeConfig = {
+    pending_inspection: { color: 'bg-blue-500', text: '待验货', textColor: 'text-blue-600', bg: 'bg-blue-50' },
+    near_timeout: { color: 'bg-orange-500', text: '快超时', textColor: 'text-orange-600', bg: 'bg-orange-50' },
+    in_dispute: { color: 'bg-red-500', text: '争议中', textColor: 'text-red-600', bg: 'bg-red-50' },
+  };
 
   const getSourceIcon = () => {
     switch (order.sourceType) {
@@ -216,7 +249,7 @@ function OrderCard({
       >
         <div onClick={onClick} className="cursor-pointer">
           <div className="flex items-center justify-between px-4 pt-4 pb-2">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <span className="text-[11px] text-gray-400 font-mono">{order.orderNo}</span>
               {getSourceIcon()}
               {order.sourceType === 'relay' && (
@@ -228,6 +261,21 @@ function OrderCard({
                 <Badge variant="default" size="sm" className="bg-indigo-100 text-indigo-700 border-indigo-200">
                   {order.relayOrderIds?.length || order.relaySubOrders?.length || 0}家供应商
                 </Badge>
+              )}
+              {alertType !== 'none' && (
+                <div className="flex items-center gap-1">
+                  {alertType === 'near_timeout' ? (
+                    <span className="relative flex h-2 w-2">
+                      <span className={cn('animate-ping absolute inline-flex h-full w-full rounded-full opacity-75', alertBadgeConfig[alertType].color)} />
+                      <span className={cn('relative inline-flex rounded-full h-2 w-2', alertBadgeConfig[alertType].color)} />
+                    </span>
+                  ) : (
+                    <span className={cn('w-2 h-2 rounded-full', alertBadgeConfig[alertType].color)} />
+                  )}
+                  <span className={cn('text-[10px] font-semibold', alertBadgeConfig[alertType].textColor)}>
+                    {alertBadgeConfig[alertType].text}
+                  </span>
+                </div>
               )}
             </div>
             <Badge variant={badge.variant} size="sm" dot>
@@ -288,6 +336,25 @@ function OrderCard({
           </div>
         </div>
 
+        {afterSalesFilter !== 'none' && alertType === 'near_timeout' && (
+          <div className="mx-4 mt-3 mb-1 p-2.5 rounded-xl bg-orange-50 border border-orange-200 flex items-center gap-2">
+            <AlertTriangle size={14} className="text-orange-600 flex-shrink-0" />
+            <p className="text-[11px] text-orange-700 flex-1">
+              签收已超过3天未确认，系统将在7天后自动确认适配
+            </p>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onQuickAction?.('contact_seller', order.id);
+              }}
+              className="flex items-center gap-1 px-2 py-1 rounded-lg bg-white border border-orange-200 text-[10px] font-medium text-orange-700 hover:bg-orange-100 transition-colors"
+            >
+              <MessageCircle size={10} />
+              联系卖家
+            </button>
+          </div>
+        )}
+
         <div className="px-4 py-2.5 bg-gray-50/50 border-t border-gray-100 flex items-center justify-between">
           <div className="flex items-center gap-3 text-[11px] text-gray-500">
             <div className="flex items-center gap-1">
@@ -315,30 +382,83 @@ function OrderCard({
           </div>
 
           <div className="flex items-center gap-1.5">
-            {order.status === 'pending_payment' && (
-              <Button size="sm" variant="primary">
-                去支付
+            {afterSalesFilter === 'pending_inspection' && alertType === 'pending_inspection' && (
+              <Button
+                size="sm"
+                variant="primary"
+                onClick={(e: any) => {
+                  e.stopPropagation();
+                  onQuickAction?.('confirm_adapt', order.id);
+                }}
+              >
+                立即确认适配
               </Button>
             )}
-            {order.status === 'delivered' && (
-              <Button size="sm" variant="primary">
-                确认适配
+            {afterSalesFilter === 'near_timeout' && alertType === 'near_timeout' && (
+              <>
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={(e: any) => {
+                    e.stopPropagation();
+                    onQuickAction?.('contact_seller', order.id);
+                  }}
+                  leftIcon={<MessageCircle size={12} />}
+                >
+                  联系卖家
+                </Button>
+                <Button
+                  size="sm"
+                  variant="primary"
+                  onClick={(e: any) => {
+                    e.stopPropagation();
+                    onQuickAction?.('confirm_adapt', order.id);
+                  }}
+                >
+                  确认适配
+                </Button>
+              </>
+            )}
+            {afterSalesFilter === 'in_dispute' && alertType === 'in_dispute' && (
+              <Button
+                size="sm"
+                variant="primary"
+                onClick={(e: any) => {
+                  e.stopPropagation();
+                  onQuickAction?.('view_dispute', order.id);
+                }}
+              >
+                查看进度
               </Button>
             )}
-            {order.status === 'adapt_confirmed' && (
-              <Button size="sm" variant="primary">
-                释放尾款
-              </Button>
-            )}
-            {order.status === 'shipped' && (
-              <Button size="sm" variant="secondary">
-                查看物流
-              </Button>
-            )}
-            {order.status === 'disputing' && (
-              <Button size="sm" variant="primary">
-                处理争议
-              </Button>
+            {afterSalesFilter === 'none' && (
+              <>
+                {order.status === 'pending_payment' && (
+                  <Button size="sm" variant="primary">
+                    去支付
+                  </Button>
+                )}
+                {order.status === 'delivered' && (
+                  <Button size="sm" variant="primary">
+                    确认适配
+                  </Button>
+                )}
+                {order.status === 'adapt_confirmed' && (
+                  <Button size="sm" variant="primary">
+                    释放尾款
+                  </Button>
+                )}
+                {order.status === 'shipped' && (
+                  <Button size="sm" variant="secondary">
+                    查看物流
+                  </Button>
+                )}
+                {order.status === 'disputing' && (
+                  <Button size="sm" variant="primary">
+                    处理争议
+                  </Button>
+                )}
+              </>
             )}
           </div>
         </div>
@@ -423,11 +543,19 @@ function OrderCard({
 export default function OrderList() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { orders, fetchOrders, isLoading } = useOrderStore();
+  const {
+    orders,
+    fetchOrders,
+    isLoading,
+    getPendingInspectionOrders,
+    getNearTimeoutOrders,
+    getInDisputeOrders,
+  } = useOrderStore();
   const { user } = useAuthStore();
 
   const [activeTab, setActiveTab] = useState<TabKey>('pending_ship');
   const [activeSourceTab, setActiveSourceTab] = useState<SourceType>('all');
+  const [afterSalesFilter, setAfterSalesFilter] = useState<AfterSalesFilter>('none');
   const [searchQuery, setSearchQuery] = useState('');
   const [showFilter, setShowFilter] = useState(false);
   const [onlyRelay, setOnlyRelay] = useState(false);
@@ -458,9 +586,32 @@ export default function OrderList() {
     return orders.filter((o) => o.status === 'preparing' || o.status === 'deposited').length;
   }, [orders]);
 
+  const pendingInspectionCount = useMemo(() => getPendingInspectionOrders().length, [getPendingInspectionOrders]);
+  const nearTimeoutCount = useMemo(() => getNearTimeoutOrders().length, [getNearTimeoutOrders]);
+  const inDisputeCount = useMemo(() => getInDisputeOrders().length, [getInDisputeOrders]);
+  const totalAlertsCount = pendingInspectionCount + nearTimeoutCount + inDisputeCount;
+
   const filteredOrders = useMemo(() => {
-    const activeTabConfig = TABS.find((t) => t.key === activeTab)!;
-    let result = orders.filter((o) => activeTabConfig.statuses.includes(o.status));
+    let result: GuaranteeOrder[];
+
+    if (afterSalesFilter !== 'none') {
+      switch (afterSalesFilter) {
+        case 'pending_inspection':
+          result = getPendingInspectionOrders();
+          break;
+        case 'near_timeout':
+          result = getNearTimeoutOrders();
+          break;
+        case 'in_dispute':
+          result = getInDisputeOrders();
+          break;
+        default:
+          result = orders;
+      }
+    } else {
+      const activeTabConfig = TABS.find((t) => t.key === activeTab)!;
+      result = orders.filter((o) => activeTabConfig.statuses.includes(o.status));
+    }
 
     if (activeSourceTab !== 'all') {
       result = result.filter((o) => o.sourceType === activeSourceTab);
@@ -514,10 +665,41 @@ export default function OrderList() {
   const activeFiltersCount = (onlyRelay ? 1 : 0) + (onlyUrgent ? 1 : 0) + (timeRange !== 'all' ? 1 : 0);
 
   const handleCardClick = (orderId: string, status: OrderStatus) => {
+    if (afterSalesFilter === 'in_dispute') {
+      navigate(`/order/${orderId}/dispute`);
+      return;
+    }
     if (status === 'disputing') {
       navigate(`/order/${orderId}/dispute`);
+    } else if (afterSalesFilter === 'pending_inspection' || afterSalesFilter === 'near_timeout') {
+      navigate(`/order/${orderId}`, { state: { fromAfterSales: afterSalesFilter } });
     } else {
       navigate(`/order/${orderId}`);
+    }
+  };
+
+  const handleAfterSalesCardClick = (type: AfterSalesFilter) => {
+    setAfterSalesFilter(type);
+    if (type === 'pending_inspection' || type === 'near_timeout') {
+      setActiveTab('pending_confirm');
+    } else if (type === 'in_dispute') {
+      setActiveTab('dispute');
+    }
+  };
+
+  const handleQuickAction = (action: string, orderId: string) => {
+    switch (action) {
+      case 'confirm_adapt':
+        navigate(`/order/${orderId}`, { state: { fromAfterSales: afterSalesFilter } });
+        break;
+      case 'view_dispute':
+        navigate(`/order/${orderId}/dispute`);
+        break;
+      case 'contact_seller':
+        alert('正在跳转到联系卖家页面...');
+        break;
+      default:
+        break;
     }
   };
 
@@ -815,6 +997,204 @@ export default function OrderList() {
             </Card>
           </motion.div>
         )}
+
+        {totalAlertsCount > 0 ? (
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4, delay: 0.1 }}
+          >
+            <div className="grid grid-cols-3 gap-2">
+              <motion.div
+                initial={{ opacity: 0, x: -20 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ delay: 0.15 }}
+                onClick={() => handleAfterSalesCardClick('pending_inspection')}
+                className={cn(
+                  'cursor-pointer p-3 rounded-2xl border transition-all',
+                  afterSalesFilter === 'pending_inspection'
+                    ? 'bg-blue-50 border-blue-300 shadow-md'
+                    : pendingInspectionCount === 0
+                    ? 'bg-gray-50 border-gray-100 opacity-50'
+                    : 'bg-white border-blue-100 hover:bg-blue-50/50 hover:border-blue-200'
+                )}
+              >
+                <div className="flex items-center gap-1.5 mb-2">
+                  <div className={cn(
+                    'w-7 h-7 rounded-xl flex items-center justify-center',
+                    pendingInspectionCount === 0 ? 'bg-gray-200' : 'bg-blue-100'
+                  )}>
+                    <PackageSearch size={14} className={pendingInspectionCount === 0 ? 'text-gray-400' : 'text-blue-600'} />
+                  </div>
+                  <span className={cn(
+                    'text-xs font-bold',
+                    pendingInspectionCount === 0 ? 'text-gray-400' : 'text-blue-700'
+                  )}>
+                    待验货适配
+                  </span>
+                </div>
+                <div className="flex items-baseline gap-1">
+                  <span className={cn(
+                    'text-xl font-extrabold',
+                    pendingInspectionCount === 0 ? 'text-gray-300' : 'text-blue-600'
+                  )}>
+                    {pendingInspectionCount}
+                  </span>
+                  <span className={cn(
+                    'text-[10px]',
+                    pendingInspectionCount === 0 ? 'text-gray-300' : 'text-blue-400'
+                  )}>
+                    单
+                  </span>
+                </div>
+                <p className={cn(
+                  'text-[10px] mt-1 leading-tight',
+                  pendingInspectionCount === 0 ? 'text-gray-300' : 'text-blue-500/70'
+                )}>
+                  已签收未做适配确认
+                </p>
+              </motion.div>
+
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.2 }}
+                onClick={() => handleAfterSalesCardClick('near_timeout')}
+                className={cn(
+                  'cursor-pointer p-3 rounded-2xl border transition-all',
+                  afterSalesFilter === 'near_timeout'
+                    ? 'bg-orange-50 border-orange-300 shadow-md'
+                    : nearTimeoutCount === 0
+                    ? 'bg-gray-50 border-gray-100 opacity-50'
+                    : 'bg-white border-orange-100 hover:bg-orange-50/50 hover:border-orange-200'
+                )}
+              >
+                <div className="flex items-center gap-1.5 mb-2">
+                  <div className={cn(
+                    'w-7 h-7 rounded-xl flex items-center justify-center',
+                    nearTimeoutCount === 0 ? 'bg-gray-200' : 'bg-orange-100'
+                  )}>
+                    <Clock size={14} className={nearTimeoutCount === 0 ? 'text-gray-400' : 'text-orange-600'} />
+                  </div>
+                  <span className={cn(
+                    'text-xs font-bold',
+                    nearTimeoutCount === 0 ? 'text-gray-400' : 'text-orange-700'
+                  )}>
+                    快超时
+                  </span>
+                </div>
+                <div className="flex items-baseline gap-1">
+                  <span className={cn(
+                    'text-xl font-extrabold',
+                    nearTimeoutCount === 0 ? 'text-gray-300' : 'text-orange-600'
+                  )}>
+                    {nearTimeoutCount}
+                  </span>
+                  <span className={cn(
+                    'text-[10px]',
+                    nearTimeoutCount === 0 ? 'text-gray-300' : 'text-orange-400'
+                  )}>
+                    单
+                  </span>
+                </div>
+                <p className={cn(
+                  'text-[10px] mt-1 leading-tight',
+                  nearTimeoutCount === 0 ? 'text-gray-300' : 'text-orange-500/70'
+                )}>
+                  签收超3天未确认
+                </p>
+              </motion.div>
+
+              <motion.div
+                initial={{ opacity: 0, x: 20 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ delay: 0.25 }}
+                onClick={() => handleAfterSalesCardClick('in_dispute')}
+                className={cn(
+                  'cursor-pointer p-3 rounded-2xl border transition-all',
+                  afterSalesFilter === 'in_dispute'
+                    ? 'bg-red-50 border-red-300 shadow-md'
+                    : inDisputeCount === 0
+                    ? 'bg-gray-50 border-gray-100 opacity-50'
+                    : 'bg-white border-red-100 hover:bg-red-50/50 hover:border-red-200'
+                )}
+              >
+                <div className="flex items-center gap-1.5 mb-2">
+                  <div className={cn(
+                    'w-7 h-7 rounded-xl flex items-center justify-center',
+                    inDisputeCount === 0 ? 'bg-gray-200' : 'bg-red-100'
+                  )}>
+                    <AlertTriangle size={14} className={inDisputeCount === 0 ? 'text-gray-400' : 'text-red-600'} />
+                  </div>
+                  <span className={cn(
+                    'text-xs font-bold',
+                    inDisputeCount === 0 ? 'text-gray-400' : 'text-red-700'
+                  )}>
+                    处理中
+                  </span>
+                </div>
+                <div className="flex items-baseline gap-1">
+                  <span className={cn(
+                    'text-xl font-extrabold',
+                    inDisputeCount === 0 ? 'text-gray-300' : 'text-red-600'
+                  )}>
+                    {inDisputeCount}
+                  </span>
+                  <span className={cn(
+                    'text-[10px]',
+                    inDisputeCount === 0 ? 'text-gray-300' : 'text-red-400'
+                  )}>
+                    单
+                  </span>
+                </div>
+                <p className={cn(
+                  'text-[10px] mt-1 leading-tight',
+                  inDisputeCount === 0 ? 'text-gray-300' : 'text-red-500/70'
+                )}>
+                  正在仲裁的争议
+                </p>
+              </motion.div>
+            </div>
+          </motion.div>
+        ) : (
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4, delay: 0.1 }}
+            className="p-3 rounded-2xl bg-gradient-to-r from-green-50 to-emerald-50 border border-green-200 flex items-center gap-2"
+          >
+            <span className="text-xl">🎉</span>
+            <span className="text-sm font-medium text-green-700">暂无售后提醒</span>
+          </motion.div>
+        )}
+
+        {afterSalesFilter !== 'none' && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            className="flex items-center gap-2 flex-wrap"
+          >
+            <span className="text-xs text-gray-500">售后筛选：</span>
+            <Chip
+              variant={afterSalesFilter === 'pending_inspection' ? 'primary' : 'warning'}
+              size="sm"
+              icon={afterSalesFilter === 'pending_inspection' ? <PackageSearch size={11} /> : afterSalesFilter === 'near_timeout' ? <Clock size={11} /> : <AlertTriangle size={11} />}
+              closable
+              onClose={() => setAfterSalesFilter('none')}
+            >
+              {afterSalesFilter === 'pending_inspection' && `待验货 (${pendingInspectionCount})`}
+              {afterSalesFilter === 'near_timeout' && `快超时 (${nearTimeoutCount})`}
+              {afterSalesFilter === 'in_dispute' && `争议中 (${inDisputeCount})`}
+            </Chip>
+            <button
+              onClick={() => setAfterSalesFilter('none')}
+              className="text-xs text-gray-400 hover:text-gray-600"
+            >
+              清除筛选
+            </button>
+          </motion.div>
+        )}
+
         {activeFiltersCount > 0 && (
           <motion.div
             initial={{ opacity: 0, height: 0 }}
@@ -902,9 +1282,13 @@ export default function OrderList() {
               <div className="w-20 h-20 mx-auto mb-4 rounded-2xl bg-gray-100 flex items-center justify-center">
                 <FileText size={32} className="text-gray-300" />
               </div>
-              <h3 className="text-base font-semibold text-gray-700 mb-1">暂无相关订单</h3>
+              <h3 className="text-base font-semibold text-gray-700 mb-1">
+                {afterSalesFilter !== 'none' ? '暂无此类提醒' : '暂无相关订单'}
+              </h3>
               <p className="text-sm text-gray-400 mb-4">
-                换个状态筛选或清除搜索条件试试
+                {afterSalesFilter !== 'none'
+                  ? '当前筛选条件下没有售后提醒订单'
+                  : '换个状态筛选或清除搜索条件试试'}
               </p>
               <Button
                 variant="secondary"
@@ -915,6 +1299,7 @@ export default function OrderList() {
                   setTimeRange('all');
                   setOnlyRelay(false);
                   setOnlyUrgent(false);
+                  setAfterSalesFilter('none');
                 }}
               >
                 重置筛选
@@ -935,6 +1320,8 @@ export default function OrderList() {
                   index={index}
                   onClick={() => handleCardClick(order.id, order.status)}
                   isHighlighted={highlightOrderId === order.id}
+                  afterSalesFilter={afterSalesFilter}
+                  onQuickAction={handleQuickAction}
                 />
               ))}
             </motion.div>

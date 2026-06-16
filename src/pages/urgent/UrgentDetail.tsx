@@ -188,6 +188,7 @@ function QuoteCompareView({
   onAcceptQuote,
   isPublisher,
   onChat,
+  acceptedQuoteId,
 }: {
   quotes: Quote[];
   selectedQuoteId: string | null;
@@ -195,6 +196,7 @@ function QuoteCompareView({
   onAcceptQuote: (id: string) => void;
   isPublisher: boolean;
   onChat: () => void;
+  acceptedQuoteId?: string;
 }) {
   const renderStars = (rating: number) => {
     const fullStars = Math.floor(rating);
@@ -255,6 +257,7 @@ function QuoteCompareView({
         <div className="space-y-2 py-2">
           {quotes.map((quote, index) => {
             const isSelected = selectedQuoteId === quote.id;
+            const isAccepted = acceptedQuoteId === quote.id;
             return (
               <motion.div
                 key={quote.id}
@@ -263,12 +266,19 @@ function QuoteCompareView({
                 transition={{ duration: 0.3, delay: index * 0.05 }}
                 onClick={() => onSelectQuote(quote.id)}
                 className={cn(
-                  'grid grid-cols-8 gap-2 items-center p-3 rounded-2xl border-2 cursor-pointer transition-all',
-                  isSelected
+                  'grid grid-cols-8 gap-2 items-center p-3 rounded-2xl border-2 cursor-pointer transition-all relative',
+                  isAccepted
+                    ? 'border-orange-500 bg-orange-50/50 shadow-lg shadow-orange-500/10'
+                    : isSelected
                     ? 'border-orange-500 bg-orange-50/50 shadow-lg shadow-orange-500/10'
                     : 'border-gray-100 bg-white hover:border-gray-200 hover:bg-gray-50'
                 )}
               >
+                {isAccepted && (
+                  <div className="absolute -top-2 left-4 px-2 py-0.5 rounded-full bg-gradient-to-r from-orange-500 to-amber-500 text-white text-[10px] font-bold shadow-sm">
+                    ✓ 已采纳
+                  </div>
+                )}
                 <div className="col-span-1 text-center">
                   <div className="text-sm font-bold text-red-600">
                     {formatPriceShort(quote.totalPrice)}
@@ -384,11 +394,16 @@ export default function UrgentDetail() {
   const sortedQuotes = useMemo(() => {
     if (!post) return [];
     const quotes = [...post.quotes];
-    return quotes.sort((a, b) => {
+    const sorted = quotes.sort((a, b) => {
       const aVal = priceSort === 'total' ? a.totalPrice : a.price;
       const bVal = priceSort === 'total' ? b.totalPrice : b.price;
       return aVal - bVal;
     });
+    const acceptedQuote = post.acceptedQuoteId
+      ? sorted.find(q => q.id === post.acceptedQuoteId)
+      : null;
+    const otherQuotes = sorted.filter(q => q.id !== post.acceptedQuoteId);
+    return acceptedQuote ? [acceptedQuote, ...otherQuotes] : otherQuotes;
   }, [post, priceSort]);
 
   const minQuotePrice = sortedQuotes.length > 0 ? sortedQuotes[0].totalPrice : 0;
@@ -758,9 +773,7 @@ export default function UrgentDetail() {
                           quote={quote}
                           index={i}
                           sortBy={priceSort}
-                          isAccepted={
-                            post.status === 'locked' && i === 0
-                          }
+                          isAccepted={post.acceptedQuoteId === quote.id}
                           onAccept={isPublisher ? () => handleAcceptQuote(quote.id) : undefined}
                           onChat={handleChat}
                         />
@@ -781,6 +794,7 @@ export default function UrgentDetail() {
                         onAcceptQuote={handleAcceptQuote}
                         isPublisher={isPublisher}
                         onChat={handleChat}
+                        acceptedQuoteId={post.acceptedQuoteId}
                       />
                     </motion.div>
                   )}

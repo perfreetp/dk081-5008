@@ -1,9 +1,10 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   ArrowLeft,
   MoreHorizontal,
   ChevronRight,
+  ChevronDown,
   Phone,
   MessageCircle,
   Star,
@@ -30,7 +31,7 @@ import {
   Layers,
   Sparkles,
 } from 'lucide-react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import { useOrderStore } from '../../stores/orderStore';
 import { useAuthStore } from '../../stores/authStore';
 import OrderTimeline from '../../components/business/OrderTimeline';
@@ -134,6 +135,10 @@ interface SubOrderItem {
   quantity: number;
   unitPrice: number;
   price: number;
+  goodsAmount: number;
+  shippingFee: number;
+  totalAmount: number;
+  depositAmount: number;
   status: string;
   statusColor: string;
   statusBadgeVariant: 'default' | 'success' | 'warning' | 'danger' | 'info';
@@ -151,7 +156,7 @@ const SUBORDER_STATUS_CONFIG: Record<OrderStatus, { label: string; color: string
   cancelled: { label: '已取消', color: 'bg-gray-100 text-gray-600', variant: 'default' },
 };
 
-function QuoteSnapshotCard({ quote }: { quote: Quote }) {
+function QuoteSnapshotCard({ quote, onClick }: { quote: Quote; onClick?: () => void }) {
   const renderStars = (rating: number) => {
     const fullStars = Math.floor(rating);
     const hasHalf = rating - fullStars >= 0.5;
@@ -175,7 +180,7 @@ function QuoteSnapshotCard({ quote }: { quote: Quote }) {
   };
 
   return (
-    <div className="space-y-3">
+    <div className={cn("space-y-3", onClick && "cursor-pointer hover:opacity-90 transition-opacity")} onClick={onClick}>
       <div className="flex items-center gap-3">
         <img
           src={quote.supplier.avatar}
@@ -183,10 +188,16 @@ function QuoteSnapshotCard({ quote }: { quote: Quote }) {
           className="w-10 h-10 rounded-full"
         />
         <div className="flex-1 min-w-0">
-          <div className="text-sm font-semibold text-gray-900 truncate">
+          <div className="text-sm font-semibold text-gray-900 truncate flex items-center gap-1.5">
             {quote.supplier.name}
+            {onClick && <ChevronRight size={12} className="text-orange-500" />}
           </div>
-          <div className="flex items-center gap-2 text-[11px] text-gray-500">
+          <div className="flex items-center gap-2 text-[11px] text-gray-500 flex-wrap">
+            <div className="flex items-center gap-1">
+              <MapPin size={10} className="text-blue-500" />
+              <span>{quote.supplier.city}</span>
+            </div>
+            <span>·</span>
             {renderStars(quote.supplier.reputation.starRating)}
             <span>·</span>
             <span>{quote.supplier.reputation.totalDeals}笔交易</span>
@@ -253,6 +264,7 @@ function QuoteSnapshotCard({ quote }: { quote: Quote }) {
 export default function OrderDetail() {
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
+  const location = useLocation();
   const { getOrderById, confirmAdaptation, completeOrder, payDeposit } = useOrderStore();
   const { user } = useAuthStore();
 
@@ -263,6 +275,8 @@ export default function OrderDetail() {
   const [adaptImages, setAdaptImages] = useState<string[]>([]);
   const [adaptRemark, setAdaptRemark] = useState('');
   const [expandedRelay, setExpandedRelay] = useState(true);
+  const [highlightAdaptSection, setHighlightAdaptSection] = useState(false);
+  const adaptSectionRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (id) {
@@ -275,10 +289,25 @@ export default function OrderDetail() {
     }
   }, [id, getOrderById, navigate]);
 
+  useEffect(() => {
+    const fromAfterSales = (location.state as { fromAfterSales?: string })?.fromAfterSales;
+    if (fromAfterSales && order && (order.status === 'delivered' || order.status === 'adapt_confirmed')) {
+      setTimeout(() => {
+        if (adaptSectionRef.current) {
+          adaptSectionRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          setHighlightAdaptSection(true);
+          setTimeout(() => setHighlightAdaptSection(false), 3000);
+        }
+      }, 500);
+    }
+  }, [location.state, order]);
+
   const headerConfig = useMemo(
     () => (order ? STATUS_HEADER_CONFIG[order.status] : null),
     [order]
   );
+
+  const [expandedSubOrderIds, setExpandedSubOrderIds] = useState<Set<string>>(new Set());
 
   const subOrders: SubOrderItem[] = useMemo(() => {
     if (!order?.isRelayParent) return [];
@@ -293,11 +322,15 @@ export default function OrderDetail() {
           supplierId: snap.supplierId,
           supplierName: snap.supplierName,
           supplierAvatar: snap.supplierAvatar,
-          supplierCity: subOrder?.supplier.city || '',
+          supplierCity: snap.supplierCity || subOrder?.supplier.city || '',
           partName: order.partInfo.partName,
           quantity: snap.quantity,
           unitPrice: snap.unitPrice,
-          price: snap.amount,
+          price: snap.totalAmount,
+          goodsAmount: snap.amount,
+          shippingFee: snap.shippingFee,
+          totalAmount: snap.totalAmount,
+          depositAmount: snap.depositAmount,
           status: statusConfig.label,
           statusColor: statusConfig.color,
           statusBadgeVariant: statusConfig.variant,
@@ -310,6 +343,9 @@ export default function OrderDetail() {
       const subOrder = getOrderById(oid);
       const status = subOrder?.status || 'pending_payment';
       const statusConfig = SUBORDER_STATUS_CONFIG[status];
+      const qty = subOrder?.partInfo.quantity || 1;
+      const unitPrice = subOrder?.partInfo.unitPrice || 0;
+      const goodsAmount = qty * unitPrice;
       return {
         id: oid,
         supplierId: subOrder?.supplierId || '',
@@ -317,15 +353,31 @@ export default function OrderDetail() {
         supplierAvatar: subOrder?.supplier.avatar || '',
         supplierCity: subOrder?.supplier.city || '',
         partName: order.partInfo.partName,
-        quantity: subOrder?.partInfo.quantity || 1,
-        unitPrice: subOrder?.partInfo.unitPrice || 0,
+        quantity: qty,
+        unitPrice,
         price: subOrder?.totalAmount || 0,
+        goodsAmount,
+        shippingFee: subOrder?.shippingFee || 10,
+        totalAmount: subOrder?.totalAmount || 0,
+        depositAmount: subOrder?.depositAmount || 0,
         status: statusConfig.label,
         statusColor: statusConfig.color,
         statusBadgeVariant: statusConfig.variant,
       };
     });
   }, [order, getOrderById]);
+
+  const toggleSubOrderExpand = (id: string) => {
+    setExpandedSubOrderIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
 
   const parentOrder = useMemo(() => {
     if (order?.isRelayParent) return null;
@@ -683,7 +735,10 @@ export default function OrderDetail() {
               </Badge>
             </div>
 
-            <QuoteSnapshotCard quote={order.partInfo.quoteSnapshot} />
+            <QuoteSnapshotCard
+              quote={order.partInfo.quoteSnapshot}
+              onClick={order.sourceType === 'urgent' && order.sourceId ? () => navigate(`/urgent/${order.sourceId}`) : undefined}
+            />
           </Card>
         )}
 
@@ -869,47 +924,132 @@ export default function OrderDetail() {
                   className="overflow-hidden"
                 >
                   <div className="p-4 space-y-2.5">
-                    {subOrders.map((sub, idx) => (
-                      <motion.div
-                        key={sub.id}
-                        initial={{ opacity: 0, x: -10 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        transition={{ delay: idx * 0.05 }}
-                        className="flex items-center gap-3 p-3 rounded-xl bg-gray-50 hover:bg-gray-100 transition-colors cursor-pointer"
-                        onClick={() => navigate(`/order/${sub.id}`)}
-                      >
-                        <div className="flex-shrink-0 relative">
-                          <img
-                            src={sub.supplierAvatar}
-                            alt={sub.supplierName}
-                            className="w-10 h-10 rounded-xl border border-gray-200"
-                          />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 mb-0.5">
-                            <span className="text-xs font-semibold text-gray-800 truncate">
-                              {sub.supplierName}
-                            </span>
-                            <Badge variant={sub.statusBadgeVariant} size="sm">
-                              {sub.status}
-                            </Badge>
+                    {subOrders.map((sub, idx) => {
+                      const isExpanded = expandedSubOrderIds.has(sub.id);
+                      return (
+                        <motion.div
+                          key={sub.id}
+                          initial={{ opacity: 0, x: -10 }}
+                          animate={{ opacity: 1, x: 0 }}
+                          transition={{ delay: idx * 0.05 }}
+                          className="rounded-xl bg-gray-50 overflow-hidden"
+                        >
+                          <div
+                            className="flex items-center gap-3 p-3 hover:bg-gray-100 transition-colors cursor-pointer"
+                            onClick={() => toggleSubOrderExpand(sub.id)}
+                          >
+                            <div className="flex-shrink-0 relative">
+                              <img
+                                src={sub.supplierAvatar}
+                                alt={sub.supplierName}
+                                className="w-10 h-10 rounded-xl border border-gray-200"
+                              />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 mb-0.5">
+                                <span className="text-xs font-semibold text-gray-800 truncate">
+                                  {sub.supplierName}
+                                </span>
+                                <Badge variant={sub.statusBadgeVariant} size="sm">
+                                  {sub.status}
+                                </Badge>
+                              </div>
+                              <div className="flex items-center gap-2 text-[11px] text-gray-500 mb-1">
+                                <MapPin size={9} className="text-gray-400" />
+                                <span>{sub.supplierCity}</span>
+                                <span className="text-gray-300">·</span>
+                                <span>x{sub.quantity}件</span>
+                                <span className="text-gray-300">·</span>
+                                <span>单价 ¥{sub.unitPrice}</span>
+                              </div>
+                              <p className="text-[11px] text-gray-400 truncate">{sub.partName}</p>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <div className="text-right flex-shrink-0">
+                                <div className="text-sm font-bold text-accent-500">¥{sub.totalAmount}</div>
+                              </div>
+                              <motion.div
+                                animate={{ rotate: isExpanded ? 180 : 0 }}
+                                transition={{ duration: 0.2 }}
+                              >
+                                <ChevronDown size={16} className="text-gray-400" />
+                              </motion.div>
+                            </div>
                           </div>
-                          <div className="flex items-center gap-2 text-[11px] text-gray-500 mb-1">
-                            <MapPin size={9} className="text-gray-400" />
-                            <span>{sub.supplierCity}</span>
-                            <span className="text-gray-300">·</span>
-                            <span>x{sub.quantity}件</span>
-                            <span className="text-gray-300">·</span>
-                            <span>单价 ¥{sub.unitPrice}</span>
-                          </div>
-                          <p className="text-[11px] text-gray-400 truncate">{sub.partName}</p>
-                        </div>
-                        <div className="text-right flex-shrink-0">
-                          <div className="text-sm font-bold text-accent-500">¥{sub.price}</div>
-                          <ChevronRight size={10} className="text-gray-300 ml-auto mt-0.5" />
-                        </div>
-                      </motion.div>
-                    ))}
+
+                          <AnimatePresence initial={false}>
+                            {isExpanded && (
+                              <motion.div
+                                initial={{ height: 0, opacity: 0 }}
+                                animate={{ height: 'auto', opacity: 1 }}
+                                exit={{ height: 0, opacity: 0 }}
+                                transition={{ duration: 0.2 }}
+                                className="overflow-hidden"
+                              >
+                                <div className="px-3 pb-3">
+                                  <div className="ml-13 p-3 rounded-xl bg-white border border-gray-100 space-y-2.5">
+                                    <div className="flex items-center justify-between">
+                                      <div className="flex items-center gap-1.5">
+                                        <Package size={12} className="text-gray-400" />
+                                        <span className="text-xs text-gray-600">货款</span>
+                                        <span className="text-[10px] text-gray-400">
+                                          ({sub.quantity} × ¥{sub.unitPrice})
+                                        </span>
+                                      </div>
+                                      <span className="text-sm font-semibold text-gray-800">
+                                        ¥{sub.goodsAmount.toFixed(2)}
+                                      </span>
+                                    </div>
+                                    <div className="flex items-center justify-between">
+                                      <div className="flex items-center gap-1.5">
+                                        <Truck size={12} className="text-gray-400" />
+                                        <span className="text-xs text-gray-600">运费</span>
+                                        <span className="text-[10px] text-gray-400">(系统预估)</span>
+                                      </div>
+                                      <span className="text-sm font-semibold text-gray-800">
+                                        ¥{sub.shippingFee.toFixed(2)}
+                                      </span>
+                                    </div>
+                                    <div className="h-px bg-gray-100" />
+                                    <div className="flex items-center justify-between">
+                                      <div className="flex items-center gap-1.5">
+                                        <Shield size={12} className="text-amber-500" />
+                                        <span className="text-xs text-gray-600">定金(30%)</span>
+                                      </div>
+                                      <span className="text-sm font-bold text-amber-600">
+                                        ¥{sub.depositAmount.toFixed(2)}
+                                      </span>
+                                    </div>
+                                    <div className="flex items-center justify-between pt-1 border-t border-dashed border-gray-100">
+                                      <span className="text-xs text-gray-600">子订单合计</span>
+                                      <span className="text-sm font-bold text-red-500">
+                                        ¥{sub.totalAmount.toFixed(2)}
+                                      </span>
+                                    </div>
+                                    <div className="flex items-center justify-between pt-1">
+                                      <span className="text-xs text-gray-500">当前状态</span>
+                                      <Badge variant={sub.statusBadgeVariant} size="sm">
+                                        {sub.status}
+                                      </Badge>
+                                    </div>
+                                    <button
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        navigate(`/order/${sub.id}`);
+                                      }}
+                                      className="w-full mt-1 h-8 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-600 text-xs font-medium flex items-center justify-center gap-1 transition-colors"
+                                    >
+                                      查看子订单详情
+                                      <ChevronRight size={12} />
+                                    </button>
+                                  </div>
+                                </div>
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
+                        </motion.div>
+                      );
+                    })}
                   </div>
                 </motion.div>
               )}
@@ -969,7 +1109,13 @@ export default function OrderDetail() {
         )}
 
         {order.status === 'delivered' && (
-          <div className="flex items-center gap-2.5">
+          <div
+            ref={adaptSectionRef}
+            className={cn(
+              'flex items-center gap-2.5 transition-all duration-500',
+              highlightAdaptSection && 'ring-4 ring-blue-400/50 ring-offset-2 rounded-xl -mx-1 px-1 py-1 animate-pulse'
+            )}
+          >
             <Button
               size="lg"
               variant="secondary"

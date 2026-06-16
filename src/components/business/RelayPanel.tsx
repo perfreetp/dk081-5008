@@ -1,6 +1,20 @@
 import { useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Link2, Check, Clock, Truck, Package, Plus, Users, X, ChevronDown, ChevronUp, Shield, ShoppingCart } from 'lucide-react';
+import {
+  Link2,
+  Check,
+  Clock,
+  Truck,
+  Package,
+  Plus,
+  Users,
+  X,
+  ChevronDown,
+  ChevronUp,
+  Shield,
+  ShoppingCart,
+  Info,
+} from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { RelayItem, UrgentPost } from '../../types';
 import Card from '../ui/Card';
@@ -10,6 +24,8 @@ import Button from '../ui/Button';
 import { cn } from '../../lib/utils';
 import { formatPrice, formatQuantity, formatTime } from '../../utils/format';
 import { useOrderStore } from '../../stores/orderStore';
+
+const DEFAULT_SHIPPING_FEE = 10;
 
 interface RelayPanelProps {
   post: UrgentPost;
@@ -105,6 +121,17 @@ function AvatarStack({ items }: { items: RelayItem[] }) {
   );
 }
 
+interface RelayCardProps {
+  item: RelayItem;
+  onConfirm?: () => void;
+  index: number;
+  selected: boolean;
+  onSelect: () => void;
+  showCheckbox: boolean;
+  expanded: boolean;
+  onToggleExpand: () => void;
+}
+
 function RelayCard({
   item,
   onConfirm,
@@ -112,15 +139,14 @@ function RelayCard({
   selected,
   onSelect,
   showCheckbox,
-}: {
-  item: RelayItem;
-  onConfirm?: () => void;
-  index: number;
-  selected: boolean;
-  onSelect: () => void;
-  showCheckbox: boolean;
-}) {
+  expanded,
+  onToggleExpand,
+}: RelayCardProps) {
   const config = statusConfig[item.status];
+  const goodsAmount = item.unitPrice * item.quantity;
+  const shippingFee = DEFAULT_SHIPPING_FEE;
+  const subTotal = goodsAmount + shippingFee;
+  const depositAmount = Math.round(subTotal * 0.3);
 
   return (
     <motion.div
@@ -129,78 +155,167 @@ function RelayCard({
       transition={{ delay: index * 0.05 }}
       whileHover={{ y: -1 }}
       className={cn(
-        "p-3 rounded-xl border transition-all",
+        "rounded-xl border transition-all overflow-hidden",
         selected
           ? "bg-indigo-50 border-indigo-200"
           : "bg-gray-50 border-gray-100"
       )}
     >
-      <div className="flex items-start justify-between gap-3">
-        {showCheckbox && (
-          <button
-            onClick={onSelect}
-            className={cn(
-              "mt-0.5 w-5 h-5 rounded-md border-2 flex items-center justify-center flex-shrink-0 transition-all",
-              selected
-                ? "bg-indigo-500 border-indigo-500"
-                : "bg-white border-gray-300 hover:border-indigo-400"
-            )}
-          >
-            {selected && <Check size={12} className="text-white" strokeWidth={3} />}
-          </button>
-        )}
-        <div className="flex items-center gap-2.5 flex-1 min-w-0">
-          <img
-            src={item.supplier.avatar}
-            alt={item.supplier.name}
-            className="w-9 h-9 rounded-full border border-gray-200 flex-shrink-0"
-          />
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-1.5 mb-0.5">
-              <span className="text-sm font-medium text-gray-900 truncate">
-                {item.supplier.name}
-              </span>
-              <Badge variant={config.variant} size="sm" icon={config.icon}>
-                {config.label}
-              </Badge>
+      <div className="p-3">
+        <div className="flex items-start justify-between gap-3">
+          {showCheckbox && (
+            <button
+              onClick={onSelect}
+              className={cn(
+                "mt-0.5 w-5 h-5 rounded-md border-2 flex items-center justify-center flex-shrink-0 transition-all",
+                selected
+                  ? "bg-indigo-500 border-indigo-500"
+                  : "bg-white border-gray-300 hover:border-indigo-400"
+              )}
+            >
+              {selected && <Check size={12} className="text-white" strokeWidth={3} />}
+            </button>
+          )}
+          <div className="flex items-center gap-2.5 flex-1 min-w-0">
+            <img
+              src={item.supplier.avatar}
+              alt={item.supplier.name}
+              className="w-9 h-9 rounded-full border border-gray-200 flex-shrink-0"
+            />
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-1.5 mb-0.5">
+                <span className="text-sm font-medium text-gray-900 truncate">
+                  {item.supplier.name}
+                </span>
+                <Badge variant={config.variant} size="sm" icon={config.icon}>
+                  {config.label}
+                </Badge>
+              </div>
+              <div className="text-xs text-gray-500 flex items-center gap-2">
+                <span>{item.supplier.city}</span>
+                <span>·</span>
+                <span>{formatTime(item.createdAt)}</span>
+              </div>
             </div>
-            <div className="text-xs text-gray-500 flex items-center gap-2">
-              <span>{item.supplier.city}</span>
-              <span>·</span>
-              <span>{formatTime(item.createdAt)}</span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <div className="text-right flex-shrink-0">
+              <div className="text-sm font-bold text-gray-900">
+                {formatPrice(goodsAmount)}
+              </div>
+              <div className="text-xs text-gray-400">
+                {formatPrice(item.unitPrice)} x{formatQuantity(item.quantity)}
+              </div>
             </div>
+            <button
+              onClick={onToggleExpand}
+              className="w-7 h-7 rounded-lg bg-white border border-gray-200 flex items-center justify-center hover:bg-gray-100 transition-colors"
+            >
+              <motion.div
+                animate={{ rotate: expanded ? 180 : 0 }}
+                transition={{ duration: 0.2 }}
+              >
+                <ChevronDown size={14} className="text-gray-500" />
+              </motion.div>
+            </button>
           </div>
         </div>
 
-        <div className="text-right flex-shrink-0">
-          <div className="text-sm font-bold text-gray-900">
-            {formatPrice(item.unitPrice)}
-          </div>
-          <div className="text-xs text-gray-400">
-            x{formatQuantity(item.quantity)}
-          </div>
-        </div>
+        {item.remark && (
+          <p className="mt-2 text-xs text-gray-500 pl-11">{item.remark}</p>
+        )}
       </div>
 
-      {item.remark && (
-        <p className="mt-2 text-xs text-gray-500 pl-11">{item.remark}</p>
-      )}
+      <AnimatePresence initial={false}>
+        {expanded && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.25 }}
+            className="overflow-hidden"
+          >
+            <div className="px-3 pb-3">
+              <div className="ml-11 p-3 rounded-xl bg-white border border-gray-100 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5">
+                    <Package size={12} className="text-gray-400" />
+                    <span className="text-xs text-gray-600">货款</span>
+                    <span className="text-[10px] text-gray-400">
+                      ({formatQuantity(item.quantity)} × {formatPrice(item.unitPrice)})
+                    </span>
+                  </div>
+                  <span className="text-sm font-semibold text-gray-800">
+                    {formatPrice(goodsAmount)}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5">
+                    <Truck size={12} className="text-gray-400" />
+                    <span className="text-xs text-gray-600">运费</span>
+                    <span className="text-[10px] text-gray-400">(系统预估)</span>
+                  </div>
+                  <span className="text-sm font-semibold text-gray-800">
+                    {formatPrice(shippingFee)}
+                  </span>
+                </div>
+                <div className="h-px bg-gray-100" />
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5">
+                    <Shield size={12} className="text-amber-500" />
+                    <span className="text-xs text-gray-600">定金(30%)</span>
+                  </div>
+                  <span className="text-sm font-bold text-amber-600">
+                    {formatPrice(depositAmount)}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between pt-1 border-t border-dashed border-gray-100">
+                  <span className="text-xs text-gray-600">子订单合计</span>
+                  <span className="text-sm font-bold text-red-500">
+                    {formatPrice(subTotal)}
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5 pt-1">
+                  <Chip variant={config.variant} size="sm" icon={config.icon}>
+                    当前状态：{config.label}
+                  </Chip>
+                </div>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {item.status === 'intention' && onConfirm && !showCheckbox && (
-        <div className="mt-2.5 pl-11">
-          <Button
-            variant="secondary"
-            size="sm"
-            leftIcon={<Check size={13} />}
-            onClick={onConfirm}
-            className="w-full"
-          >
-            确认接龙
-          </Button>
+        <div className="px-3 pb-3">
+          <div className="ml-11">
+            <Button
+              variant="secondary"
+              size="sm"
+              leftIcon={<Check size={13} />}
+              onClick={onConfirm}
+              className="w-full"
+            >
+              确认接龙
+            </Button>
+          </div>
         </div>
       )}
     </motion.div>
   );
+}
+
+interface ConfirmModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onConfirm: () => void;
+  selectedItems: RelayItem[];
+  goodsTotal: number;
+  shippingTotal: number;
+  totalAmount: number;
+  depositAmount: number;
+  isSubmitting: boolean;
 }
 
 function ConfirmModal({
@@ -208,16 +323,12 @@ function ConfirmModal({
   onClose,
   onConfirm,
   selectedItems,
+  goodsTotal,
+  shippingTotal,
   totalAmount,
   depositAmount,
-}: {
-  isOpen: boolean;
-  onClose: () => void;
-  onConfirm: () => void;
-  selectedItems: RelayItem[];
-  totalAmount: number;
-  depositAmount: number;
-}) {
+  isSubmitting,
+}: ConfirmModalProps) {
   if (!isOpen) return null;
 
   return (
@@ -234,7 +345,7 @@ function ConfirmModal({
         animate={{ y: 0 }}
         exit={{ y: '100%' }}
         transition={{ type: 'spring', damping: 25, stiffness: 300 }}
-        className="fixed bottom-0 left-0 right-0 z-50 bg-white rounded-t-3xl max-h-[85vh] overflow-hidden"
+        className="fixed bottom-0 left-0 right-0 z-50 bg-white rounded-t-3xl max-h-[88vh] overflow-hidden"
       >
         <div className="sticky top-0 bg-white z-10 px-4 pt-3 pb-4 border-b border-gray-100">
           <div className="w-12 h-1 bg-gray-200 rounded-full mx-auto mb-3" />
@@ -248,69 +359,113 @@ function ConfirmModal({
             </button>
           </div>
           <p className="text-[11px] text-gray-500 mt-1">
-            共 {selectedItems.length} 家供应商，{selectedItems.reduce((s, i) => s + i.quantity, 0)} 件商品
+            共 {selectedItems.length} 家供应商，
+            {selectedItems.reduce((s, i) => s + i.quantity, 0)} 件商品
           </p>
         </div>
 
-        <div className="p-4 space-y-4 overflow-y-auto max-h-[calc(85vh-200px)]">
-          <div className="space-y-2">
-            <div className="text-sm font-semibold text-gray-800">供应商明细</div>
-            {selectedItems.map((item, idx) => (
-              <motion.div
-                key={item.id}
-                initial={{ opacity: 0, x: -10 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: idx * 0.05 }}
-                className="flex items-center gap-3 p-3 rounded-xl bg-gray-50"
-              >
-                <img
-                  src={item.supplier.avatar}
-                  alt={item.supplier.name}
-                  className="w-10 h-10 rounded-full flex-shrink-0"
-                />
-                <div className="flex-1 min-w-0">
-                  <div className="text-sm font-medium text-gray-800 truncate">
-                    {item.supplier.name}
+        <div className="p-4 space-y-4 overflow-y-auto max-h-[calc(88vh-220px)]">
+          <div className="space-y-2.5">
+            <div className="text-sm font-semibold text-gray-800 flex items-center gap-1.5">
+              <Users size={14} className="text-indigo-500" />
+              供应商明细
+            </div>
+            {selectedItems.map((item, idx) => {
+              const goodsAmount = item.unitPrice * item.quantity;
+              const shippingFee = DEFAULT_SHIPPING_FEE;
+              const subTotal = goodsAmount + shippingFee;
+              return (
+                <motion.div
+                  key={item.id}
+                  initial={{ opacity: 0, x: -10 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: idx * 0.05 }}
+                  className="p-3 rounded-xl bg-gray-50 space-y-2"
+                >
+                  <div className="flex items-center gap-3">
+                    <img
+                      src={item.supplier.avatar}
+                      alt={item.supplier.name}
+                      className="w-10 h-10 rounded-full flex-shrink-0"
+                    />
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-medium text-gray-800 truncate">
+                        {item.supplier.name}
+                      </div>
+                      <div className="text-[11px] text-gray-500">
+                        {item.supplier.city} · x{item.quantity}件 · 单价{formatPrice(item.unitPrice)}
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-sm font-bold text-gray-900">
+                        {formatPrice(subTotal)}
+                      </div>
+                    </div>
                   </div>
-                  <div className="text-[11px] text-gray-500">
-                    {item.supplier.city} · x{item.quantity}件
+                  <div className="ml-13 pl-13 grid grid-cols-3 gap-2 pt-2 border-t border-gray-200/70">
+                    <div className="text-center">
+                      <div className="text-[10px] text-gray-400 mb-0.5">货款</div>
+                      <div className="text-[11px] font-semibold text-gray-700">
+                        {formatPrice(goodsAmount)}
+                      </div>
+                    </div>
+                    <div className="text-center">
+                      <div className="text-[10px] text-gray-400 mb-0.5">运费</div>
+                      <div className="text-[11px] font-semibold text-gray-700">
+                        {formatPrice(shippingFee)}
+                      </div>
+                    </div>
+                    <div className="text-center">
+                      <div className="text-[10px] text-gray-400 mb-0.5">定金</div>
+                      <div className="text-[11px] font-semibold text-amber-600">
+                        {formatPrice(Math.round(subTotal * 0.3))}
+                      </div>
+                    </div>
                   </div>
-                </div>
-                <div className="text-right">
-                  <div className="text-sm font-bold text-gray-900">
-                    {formatPrice(item.unitPrice * item.quantity)}
-                  </div>
-                  <div className="text-[10px] text-gray-400">
-                    单价 {formatPrice(item.unitPrice)}
-                  </div>
-                </div>
-              </motion.div>
-            ))}
+                </motion.div>
+              );
+            })}
           </div>
 
-          <div className="p-4 rounded-2xl bg-gradient-to-br from-amber-50 to-orange-50 border border-amber-100">
-            <div className="flex items-center justify-between mb-3">
+          <div className="p-4 rounded-2xl bg-gradient-to-br from-indigo-50 to-violet-50 border border-indigo-100 space-y-3">
+            <div className="text-sm font-semibold text-gray-800 mb-1 flex items-center gap-1.5">
+              <Info size={14} className="text-indigo-500" />
+              主订单汇总
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-gray-600">货款合计</span>
+              <span className="text-sm font-medium text-gray-900">
+                {formatPrice(goodsTotal)}
+              </span>
+            </div>
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-gray-600">运费合计</span>
+              <span className="text-sm font-medium text-gray-900">
+                {formatPrice(shippingTotal)}
+              </span>
+            </div>
+            <div className="h-px bg-indigo-100" />
+            <div className="flex items-center justify-between">
               <span className="text-sm text-gray-600">订单总额</span>
               <span className="text-lg font-bold text-gray-900">{formatPrice(totalAmount)}</span>
             </div>
-            <div className="h-px bg-amber-100 my-2" />
-            <div className="flex items-center gap-2 mb-2">
-              <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center">
-                <Shield size={14} className="text-white" />
-              </div>
-              <div className="flex-1">
-                <div className="text-xs font-medium text-amber-800">
-                  保证金(30%)
+            <div className="p-3 rounded-xl bg-white border border-amber-100">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center">
+                    <Shield size={14} className="text-white" />
+                  </div>
+                  <div>
+                    <div className="text-xs font-medium text-amber-800">保证金(30%)</div>
+                    <div className="text-[10px] text-amber-600">平台托管，保障交易安全</div>
+                  </div>
                 </div>
-                <div className="text-[10px] text-amber-600">
-                  平台托管，保障交易安全
-                </div>
+                <span className="text-base font-bold text-amber-700">
+                  {formatPrice(depositAmount)}
+                </span>
               </div>
-              <span className="text-base font-bold text-amber-700">
-                {formatPrice(depositAmount)}
-              </span>
             </div>
-            <ul className="text-[10px] text-amber-600 space-y-1 ml-10">
+            <ul className="text-[10px] text-indigo-600/80 space-y-1 ml-1">
               <li>· 支付后锁定各供应商货源</li>
               <li>· 适配确认后分别结算尾款</li>
               <li>· 如有争议平台介入仲裁</li>
@@ -325,6 +480,7 @@ function ConfirmModal({
               variant="secondary"
               block
               onClick={onClose}
+              disabled={isSubmitting}
             >
               取消
             </Button>
@@ -333,6 +489,7 @@ function ConfirmModal({
               variant="primary"
               block
               onClick={onConfirm}
+              loading={isSubmitting}
               leftIcon={<ShoppingCart size={16} />}
               className="bg-gradient-to-r from-indigo-500 to-violet-500"
             >
@@ -354,37 +511,54 @@ export default function RelayPanel({ post, onJoinRelay, onSubmitRelay, onConfirm
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [expandedCardIds, setExpandedCardIds] = useState<Set<string>>(new Set());
 
   const relayList = post.relayList;
   const totalQuantity = relayList.reduce((sum, r) => sum + r.quantity, 0);
-  const totalAmount = relayList.reduce((sum, r) => sum + r.unitPrice * r.quantity, 0);
+  const totalGoodsAmount = relayList.reduce((sum, r) => sum + r.unitPrice * r.quantity, 0);
+  const totalShippingFee = relayList.length * DEFAULT_SHIPPING_FEE;
+  const totalAmount = totalGoodsAmount + totalShippingFee;
   const confirmedCount = relayList.filter((r) => r.status !== 'intention').length;
   const minPrice = relayList.length > 0 ? Math.min(...relayList.map((r) => r.unitPrice)) : 0;
 
-  const selectableItems = useMemo(() => 
-    relayList.filter(r => r.status === 'intention'),
+  const selectableItems = useMemo(
+    () => relayList.filter((r) => r.status === 'intention'),
     [relayList]
   );
 
-  const selectedItems = useMemo(() => 
-    relayList.filter(r => selectedIds.has(r.id)),
+  const selectedItems = useMemo(
+    () => relayList.filter((r) => selectedIds.has(r.id)),
     [relayList, selectedIds]
   );
 
-  const selectedTotalQty = useMemo(() => 
-    selectedItems.reduce((sum, r) => sum + r.quantity, 0),
+  const selectedTotalQty = useMemo(
+    () => selectedItems.reduce((sum, r) => sum + r.quantity, 0),
     [selectedItems]
   );
 
-  const selectedTotalAmount = useMemo(() => 
-    selectedItems.reduce((sum, r) => sum + r.unitPrice * r.quantity, 0),
+  const selectedGoodsTotal = useMemo(
+    () => selectedItems.reduce((sum, r) => sum + r.unitPrice * r.quantity, 0),
     [selectedItems]
   );
 
+  const selectedShippingTotal = selectedItems.length * DEFAULT_SHIPPING_FEE;
+  const selectedTotalAmount = selectedGoodsTotal + selectedShippingTotal;
   const depositAmount = Math.round(selectedTotalAmount * 0.3);
 
   const toggleSelect = (id: string) => {
-    setSelectedIds(prev => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
+  const toggleExpand = (id: string) => {
+    setExpandedCardIds((prev) => {
       const next = new Set(prev);
       if (next.has(id)) {
         next.delete(id);
@@ -399,7 +573,7 @@ export default function RelayPanel({ post, onJoinRelay, onSubmitRelay, onConfirm
     if (selectedIds.size === selectableItems.length) {
       setSelectedIds(new Set());
     } else {
-      setSelectedIds(new Set(selectableItems.map(r => r.id)));
+      setSelectedIds(new Set(selectableItems.map((r) => r.id)));
     }
   };
 
@@ -431,6 +605,7 @@ export default function RelayPanel({ post, onJoinRelay, onSubmitRelay, onConfirm
       navigate(`/order/${parentOrder.id}`);
     } catch (error) {
       console.error('创建接龙订单失败:', error);
+      alert('创建订单失败，请重试');
     } finally {
       setIsSubmitting(false);
     }
@@ -447,12 +622,11 @@ export default function RelayPanel({ post, onJoinRelay, onSubmitRelay, onConfirm
             <div>
               <div className="text-sm font-semibold text-gray-900 flex items-center gap-1.5">
                 接龙补货
-                <span className="text-xs font-normal text-gray-400">
-                  拼单更优惠
-                </span>
+                <span className="text-xs font-normal text-gray-400">拼单更优惠</span>
               </div>
               <div className="text-xs text-gray-500">
-                接龙人数 {relayList.length} · 总数量 {formatQuantity(totalQuantity)} · 总金额 {formatPrice(totalAmount)}
+                接龙人数 {relayList.length} · 总数量 {formatQuantity(totalQuantity)} · 总货款{' '}
+                {formatPrice(totalGoodsAmount)}
               </div>
             </div>
           </div>
@@ -573,9 +747,9 @@ export default function RelayPanel({ post, onJoinRelay, onSubmitRelay, onConfirm
                     <div>
                       <div className="text-sm font-semibold text-gray-900">选中接龙</div>
                       <div className="text-[11px] text-gray-500">
-                        已选 <span className="font-bold text-indigo-600">{selectedItems.length}</span> 家供应商 · 
-                        合计 <span className="font-bold text-indigo-600">{formatQuantity(selectedTotalQty)}</span> 件 · 
-                        金额 <span className="font-bold text-indigo-600">{formatPrice(selectedTotalAmount)}</span>
+                        已选 <span className="font-bold text-indigo-600">{selectedItems.length}</span> 家供应商 ·{' '}
+                        合计 <span className="font-bold text-indigo-600">{formatQuantity(selectedTotalQty)}</span> 件 ·{' '}
+                        货款 <span className="font-bold text-indigo-600">{formatPrice(selectedGoodsTotal)}</span>
                       </div>
                     </div>
                   </div>
@@ -610,6 +784,8 @@ export default function RelayPanel({ post, onJoinRelay, onSubmitRelay, onConfirm
                   selected={selectedIds.has(item.id)}
                   onSelect={() => toggleSelect(item.id)}
                   showCheckbox={selectableItems.length > 0 && item.status === 'intention'}
+                  expanded={expandedCardIds.has(item.id)}
+                  onToggleExpand={() => toggleExpand(item.id)}
                 />
               ))}
             </div>
@@ -618,19 +794,29 @@ export default function RelayPanel({ post, onJoinRelay, onSubmitRelay, onConfirm
               <motion.div
                 initial={{ opacity: 0, y: 5 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="mt-4 p-3 rounded-xl bg-gray-900 text-white flex items-center justify-between"
+                className="mt-4 p-3 rounded-xl bg-gray-900 text-white"
               >
-                <div>
-                  <div className="text-[10px] text-gray-400">接龙总金额</div>
-                  <div className="text-lg font-bold">{formatPrice(totalAmount)}</div>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="text-[10px] text-gray-400">接龙汇总</div>
+                    <div className="flex items-baseline gap-2 mt-0.5">
+                      <span className="text-sm text-gray-400">货款{formatPrice(totalGoodsAmount)}</span>
+                      <span className="text-xs text-gray-500">+</span>
+                      <span className="text-sm text-gray-400">运费{formatPrice(totalShippingFee)}</span>
+                      <span className="text-xs text-gray-500">=</span>
+                      <span className="text-lg font-bold">{formatPrice(totalAmount)}</span>
+                    </div>
+                  </div>
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    className="bg-white text-gray-900 hover:bg-gray-100 shadow-none"
+                    disabled={selectableItems.length === 0}
+                    onClick={() => setShowConfirmModal(true)}
+                  >
+                    合并下单
+                  </Button>
                 </div>
-                <Button
-                  variant="primary"
-                  size="sm"
-                  className="bg-white text-gray-900 hover:bg-gray-100 shadow-none"
-                >
-                  合并下单
-                </Button>
               </motion.div>
             )}
           </>
@@ -666,8 +852,11 @@ export default function RelayPanel({ post, onJoinRelay, onSubmitRelay, onConfirm
         onClose={() => setShowConfirmModal(false)}
         onConfirm={handleMergeOrder}
         selectedItems={selectedItems}
+        goodsTotal={selectedGoodsTotal}
+        shippingTotal={selectedShippingTotal}
         totalAmount={selectedTotalAmount}
         depositAmount={depositAmount}
+        isSubmitting={isSubmitting}
       />
     </Card>
   );

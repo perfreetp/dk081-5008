@@ -36,7 +36,7 @@ const parseCarModel = (carModel: string): CarPlatform => {
   };
 };
 
-const normalizeCategory = (cat: string): string => {
+export const normalizeCategory = (cat: string): string => {
   const map: Record<string, string> = {
     '照明系统': '照明系统', '照明': '照明系统', '灯光': '照明系统',
     '外观覆盖': '外观覆盖', '外观覆盖件': '外观覆盖', '外观件': '外观覆盖', '外饰件': '外观覆盖', '覆盖件': '外观覆盖',
@@ -91,6 +91,26 @@ const transformUrgentOrders = (): UrgentPost[] => {
     if (!category) {
       category = classifyByPartName(order.title);
     }
+    const quotes = order.quotes.map((q) => {
+      const supplier = findUser(q.userId);
+      return {
+        id: q.id,
+        urgentPostId: q.urgentId,
+        supplierId: q.userId,
+        supplier,
+        price: q.price,
+        shippingFee: 50,
+        totalPrice: q.price + 50,
+        canShipToday: Math.random() > 0.5,
+        sourceCity: supplier.city,
+        distanceKm: Math.floor(Math.random() * 2000),
+        conditionType: 'used' as const,
+        warrantyDays: 90,
+        remark: q.message,
+        createdAt: q.createdAt,
+      };
+    });
+    const acceptedQuote = order.quotes.find((q) => q.isAccepted);
     return {
       id: order.id,
       publisherId: order.userId,
@@ -128,25 +148,8 @@ const transformUrgentOrders = (): UrgentPost[] => {
           createdAt: bid.createdAt,
         };
       }),
-      quotes: order.quotes.map((q) => {
-        const supplier = findUser(q.userId);
-        return {
-          id: q.id,
-          urgentPostId: q.urgentId,
-          supplierId: q.userId,
-          supplier,
-          price: q.price,
-          shippingFee: 50,
-          totalPrice: q.price + 50,
-          canShipToday: Math.random() > 0.5,
-          sourceCity: supplier.city,
-          distanceKm: Math.floor(Math.random() * 2000),
-          conditionType: 'used' as const,
-          warrantyDays: 90,
-          remark: q.message,
-          createdAt: q.createdAt,
-        };
-      }),
+      quotes,
+      acceptedQuoteId: acceptedQuote ? acceptedQuote.id : undefined,
     };
   });
 };
@@ -338,6 +341,7 @@ export const useUrgentStore = create<UrgentStoreState>()(
               return {
                 ...post,
                 status: 'locked',
+                acceptedQuoteId: quoteId,
                 quotes: post.quotes.map((q) => ({
                   ...q,
                 })),

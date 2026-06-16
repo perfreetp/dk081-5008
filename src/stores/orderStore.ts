@@ -11,6 +11,8 @@ import {
   CarPlatform,
   RelayItem,
   RelaySubOrderSnapshot,
+  AfterSalesAlert,
+  AfterSalesAlertType,
 } from '../types';
 import { guaranteeOrders, users, urgentOrders, spotGoods } from '../mock/data';
 import { useUrgentStore } from './urgentStore';
@@ -295,6 +297,11 @@ interface OrderStoreState {
 
   createRelayParentOrder: (urgentPostId: string, confirmedRelayItemIds: string[]) => GuaranteeOrder;
 
+  getAfterSalesAlerts: () => AfterSalesAlert[];
+  getPendingInspectionOrders: () => GuaranteeOrder[];
+  getNearTimeoutOrders: () => GuaranteeOrder[];
+  getInDisputeOrders: () => GuaranteeOrder[];
+
   setSelectedOrder: (order: GuaranteeOrder | null) => void;
   setLoading: (loading: boolean) => void;
   clearError: () => void;
@@ -377,12 +384,99 @@ export const useOrderStore = create<OrderStoreState>()(
         }
       },
 
+      getPendingInspectionOrders: () => {
+        return get()
+          .orders.filter((o) => o.status === 'delivered')
+          .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      },
+
+      getNearTimeoutOrders: () => {
+        const threeDaysMs = 3 * 24 * 60 * 60 * 1000;
+        return get()
+          .orders.filter((o) => {
+            if (o.status !== 'delivered') return false;
+            const deliveredItem = o.timeline.find((t) => t.status === 'delivered');
+            const deliveredTime = deliveredItem
+              ? new Date(deliveredItem.timestamp).getTime()
+              : new Date(o.createdAt).getTime();
+            return Date.now() - deliveredTime > threeDaysMs;
+          })
+          .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      },
+
+      getInDisputeOrders: () => {
+        return get()
+          .orders.filter((o) => o.status === 'disputing')
+          .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      },
+
+      getAfterSalesAlerts: () => {
+        const alerts: AfterSalesAlert[] = [];
+        const threeDaysMs = 3 * 24 * 60 * 60 * 1000;
+
+        get().orders.forEach((order) => {
+          if (order.status === 'delivered') {
+            const deliveredItem = order.timeline.find((t) => t.status === 'delivered');
+            const deliveredTime = deliveredItem
+              ? new Date(deliveredItem.timestamp).getTime()
+              : new Date(order.createdAt).getTime();
+            const isNearTimeout = Date.now() - deliveredTime > threeDaysMs;
+
+            if (isNearTimeout) {
+              alerts.push({
+                id: `alert_timeout_${order.id}`,
+                orderId: order.id,
+                type: 'near_timeout',
+                title: '快超时',
+                description: '签收后超过3天未确认适配',
+                deadlineAt: new Date(deliveredTime + 7 * 24 * 60 * 60 * 1000).toISOString(),
+                createdAt: new Date(deliveredTime + threeDaysMs).toISOString(),
+              });
+            } else {
+              alerts.push({
+                id: `alert_inspection_${order.id}`,
+                orderId: order.id,
+                type: 'pending_inspection',
+                title: '待验货适配',
+                description: '已签收未做适配确认',
+                createdAt: deliveredItem?.timestamp || order.createdAt,
+              });
+            }
+          }
+
+          if (order.status === 'disputing') {
+            alerts.push({
+              id: `alert_dispute_${order.id}`,
+              orderId: order.id,
+              type: 'in_dispute',
+              title: '处理中',
+              description: '正在仲裁中的争议',
+              createdAt: order.dispute?.createdAt || order.createdAt,
+            });
+          }
+        });
+
+        return alerts.sort(
+          (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+        );
+      },
+
       createOrder: (data) => {
         const buyer = findUser(data.buyerId);
         const supplier = findUser(data.supplierId);
 
+        let quoteSnapshot = data.partInfo.quoteSnapshot;
+        if (quoteSnapshot) {
+          quoteSnapshot = {
+            ...quoteSnapshot,
+            supplierId: data.supplierId,
+            supplier: supplier,
+          };
+        }
+
         const partInfo: PartSnapshot = {
           ...data.partInfo,
+          quoteSnapshot,
         };
 
         const newOrder: GuaranteeOrder = {
@@ -733,16 +827,19 @@ export const useOrderStore = create<OrderStoreState>()(
         const currentUser = authStore.user;
         if (!currentUser) throw new Error('用户未登录');
 
+        const DEFAULT_SHIPPING_FEE = 10;
         const subOrders: GuaranteeOrder[] = [];
         const subOrderIds: string[] = [];
         const relaySubOrderSnapshots: RelaySubOrderSnapshot[] = [];
         let totalAmount = 0;
+        let totalShippingFee = 0;
         let totalQty = 0;
 
         confirmedItems.forEach((item: RelayItem) => {
           const amount = item.unitPrice * item.quantity;
-          const depositAmount = Math.round(amount * 0.3);
-          const shippingFee = 50;
+          const shippingFee = DEFAULT_SHIPPING_FEE;
+          const subTotalAmount = amount + shippingFee;
+          const depositAmount = Math.round(subTotalAmount * 0.3);
 
           const subOrder: GuaranteeOrder = {
             id: 'go_' + generateId(),
@@ -762,9 +859,9 @@ export const useOrderStore = create<OrderStoreState>()(
               conditionType: 'used',
               images: post.images,
             },
-            totalAmount: amount + shippingFee,
+            totalAmount: subTotalAmount,
             depositAmount,
-            finalAmount: amount + shippingFee,
+            finalAmount: subTotalAmount,
             shippingFee,
             status: 'pending_payment',
             timeline: [
@@ -784,7 +881,8 @@ export const useOrderStore = create<OrderStoreState>()(
 
           subOrders.push(subOrder);
           subOrderIds.push(subOrder.id);
-          totalAmount += subOrder.totalAmount;
+          totalAmount += subTotalAmount;
+          totalShippingFee += shippingFee;
           totalQty += item.quantity;
 
           relaySubOrderSnapshots.push({
@@ -792,9 +890,13 @@ export const useOrderStore = create<OrderStoreState>()(
             supplierId: item.supplierId,
             supplierName: item.supplier.name,
             supplierAvatar: item.supplier.avatar,
+            supplierCity: item.supplier.city,
             quantity: item.quantity,
             unitPrice: item.unitPrice,
             amount,
+            shippingFee,
+            totalAmount: subTotalAmount,
+            depositAmount,
             status: 'pending_payment',
           });
         });
@@ -821,7 +923,7 @@ export const useOrderStore = create<OrderStoreState>()(
           totalAmount,
           depositAmount: parentDepositAmount,
           finalAmount: totalAmount,
-          shippingFee: 0,
+          shippingFee: totalShippingFee,
           status: 'pending_payment',
           timeline: [
             {
