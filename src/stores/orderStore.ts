@@ -9,8 +9,12 @@ import {
   AdaptConfirm,
   DisputeRecord,
   CarPlatform,
+  RelayItem,
+  RelaySubOrderSnapshot,
 } from '../types';
 import { guaranteeOrders, users, urgentOrders, spotGoods } from '../mock/data';
+import { useUrgentStore } from './urgentStore';
+import { useAuthStore } from './authStore';
 
 const findUser = (userId: string): User => {
   const user = users.find((u) => u.id === userId) || users[0];
@@ -255,7 +259,7 @@ interface OrderStoreState {
       | 'status'
       | 'timeline'
       | 'createdAt'
-    > & { buyerId: string; supplierId: string }
+    > & { buyerId: string; supplierId: string; sourceQuoteId?: string }
   ) => GuaranteeOrder;
   updateOrder: (id: string, data: Partial<GuaranteeOrder>) => void;
   cancelOrder: (id: string, remark?: string) => void;
@@ -288,6 +292,8 @@ interface OrderStoreState {
   ) => void;
 
   addTimelineItem: (orderId: string, item: Omit<OrderTimelineItem, 'timestamp'>) => void;
+
+  createRelayParentOrder: (urgentPostId: string, confirmedRelayItemIds: string[]) => GuaranteeOrder;
 
   setSelectedOrder: (order: GuaranteeOrder | null) => void;
   setLoading: (loading: boolean) => void;
@@ -374,6 +380,11 @@ export const useOrderStore = create<OrderStoreState>()(
       createOrder: (data) => {
         const buyer = findUser(data.buyerId);
         const supplier = findUser(data.supplierId);
+
+        const partInfo: PartSnapshot = {
+          ...data.partInfo,
+        };
+
         const newOrder: GuaranteeOrder = {
           id: 'go_' + generateId(),
           orderNo: generateOrderNo(),
@@ -383,7 +394,8 @@ export const useOrderStore = create<OrderStoreState>()(
           supplier,
           sourceType: data.sourceType,
           sourceId: data.sourceId,
-          partInfo: data.partInfo,
+          sourceQuoteId: data.sourceQuoteId,
+          partInfo,
           totalAmount: data.totalAmount,
           depositAmount: data.depositAmount,
           finalAmount: data.finalAmount,
@@ -705,6 +717,143 @@ export const useOrderStore = create<OrderStoreState>()(
             return o;
           }),
         }));
+      },
+
+      createRelayParentOrder: (urgentPostId, confirmedRelayItemIds) => {
+        const urgentStore = useUrgentStore.getState();
+        const authStore = useAuthStore.getState();
+        const post = urgentStore.getUrgentPostById(urgentPostId);
+        if (!post) throw new Error('急件不存在');
+
+        const confirmedItems = post.relayList.filter((r) =>
+          confirmedRelayItemIds.includes(r.id)
+        );
+        if (confirmedItems.length === 0) throw new Error('未选择任何接龙项');
+
+        const currentUser = authStore.user;
+        if (!currentUser) throw new Error('用户未登录');
+
+        const subOrders: GuaranteeOrder[] = [];
+        const subOrderIds: string[] = [];
+        const relaySubOrderSnapshots: RelaySubOrderSnapshot[] = [];
+        let totalAmount = 0;
+        let totalQty = 0;
+
+        confirmedItems.forEach((item: RelayItem) => {
+          const amount = item.unitPrice * item.quantity;
+          const depositAmount = Math.round(amount * 0.3);
+          const shippingFee = 50;
+
+          const subOrder: GuaranteeOrder = {
+            id: 'go_' + generateId(),
+            orderNo: generateOrderNo(),
+            buyerId: currentUser.id,
+            buyer: currentUser,
+            supplierId: item.supplierId,
+            supplier: item.supplier,
+            sourceType: 'relay',
+            sourceId: urgentPostId,
+            partInfo: {
+              partName: post.partName,
+              partNumber: post.partNumber,
+              carPlatform: post.carPlatform,
+              quantity: item.quantity,
+              unitPrice: item.unitPrice,
+              conditionType: 'used',
+              images: post.images,
+            },
+            totalAmount: amount + shippingFee,
+            depositAmount,
+            finalAmount: amount + shippingFee,
+            shippingFee,
+            status: 'pending_payment',
+            timeline: [
+              {
+                status: 'pending_payment',
+                timestamp: new Date().toISOString(),
+                operatorId: currentUser.id,
+                remark: '接龙子订单创建成功，等待支付定金',
+              },
+            ],
+            relayOrderIds: undefined,
+            isRelayParent: false,
+            adaptConfirm: undefined,
+            dispute: undefined,
+            createdAt: new Date().toISOString(),
+          };
+
+          subOrders.push(subOrder);
+          subOrderIds.push(subOrder.id);
+          totalAmount += subOrder.totalAmount;
+          totalQty += item.quantity;
+
+          relaySubOrderSnapshots.push({
+            subOrderId: subOrder.id,
+            supplierId: item.supplierId,
+            supplierName: item.supplier.name,
+            supplierAvatar: item.supplier.avatar,
+            quantity: item.quantity,
+            unitPrice: item.unitPrice,
+            amount,
+            status: 'pending_payment',
+          });
+        });
+
+        const parentDepositAmount = Math.round(totalAmount * 0.3);
+        const parentOrder: GuaranteeOrder = {
+          id: 'go_' + generateId(),
+          orderNo: generateOrderNo(),
+          buyerId: currentUser.id,
+          buyer: currentUser,
+          supplierId: currentUser.id,
+          supplier: currentUser,
+          sourceType: 'relay',
+          sourceId: urgentPostId,
+          partInfo: {
+            partName: post.partName,
+            partNumber: post.partNumber,
+            carPlatform: post.carPlatform,
+            quantity: totalQty,
+            unitPrice: totalAmount / totalQty,
+            conditionType: 'used',
+            images: post.images,
+          },
+          totalAmount,
+          depositAmount: parentDepositAmount,
+          finalAmount: totalAmount,
+          shippingFee: 0,
+          status: 'pending_payment',
+          timeline: [
+            {
+              status: 'pending_payment',
+              timestamp: new Date().toISOString(),
+              operatorId: currentUser.id,
+              remark: `接龙担保订单创建成功，共${confirmedItems.length}家供应商，等待支付定金`,
+            },
+          ],
+          relayOrderIds: subOrderIds,
+          relaySubOrders: subOrderIds,
+          isRelayParent: true,
+          relaySummary: {
+            totalSuppliers: confirmedItems.length,
+            totalQty,
+            totalAmount,
+          },
+          relaySubOrderSnapshots,
+          adaptConfirm: undefined,
+          dispute: undefined,
+          createdAt: new Date().toISOString(),
+        };
+
+        set((state) => ({
+          orders: [parentOrder, ...subOrders, ...state.orders],
+        }));
+
+        confirmedItems.forEach((item) => {
+          urgentStore.setRelayItemStatus(item.id, 'confirmed');
+        });
+
+        return parentOrder;
       },
 
       setSelectedOrder: (order) => {

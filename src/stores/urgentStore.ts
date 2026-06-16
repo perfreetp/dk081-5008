@@ -36,6 +36,33 @@ const parseCarModel = (carModel: string): CarPlatform => {
   };
 };
 
+const normalizeCategory = (cat: string): string => {
+  const map: Record<string, string> = {
+    '照明系统': '照明系统', '照明': '照明系统', '灯光': '照明系统',
+    '外观覆盖': '外观覆盖', '外观覆盖件': '外观覆盖', '外观件': '外观覆盖', '外饰件': '外观覆盖', '覆盖件': '外观覆盖',
+    '机械传动': '机械传动', '机械': '机械传动', '变速箱': '机械传动',
+    '电子电器': '电子电器', '电子': '电子电器', '电器': '电子电器', '电路': '电子电器',
+    '底盘悬挂': '底盘悬挂', '底盘': '底盘悬挂', '悬挂': '底盘悬挂',
+    '发动机件': '发动机件', '发动机': '发动机件', '动力': '发动机件',
+  };
+  return map[cat] || map[cat.replace(/件$/, '')] || cat || '';
+};
+
+const classifyByPartName = (partName: string): string => {
+  const keywords: Record<string, string[]> = {
+    '照明系统': ['大灯', '尾灯', '雾灯', '日行灯', '转向灯', '灯泡', '灯罩'],
+    '外观覆盖': ['保险杠', '叶子板', '翼子板', '机盖', '引擎盖', '车门', '尾盖', '尾门', '中网', '格栅', '后视镜', '倒车镜', '饰板', '饰条', '包围'],
+    '机械传动': ['变速箱', '离合器', '传动轴', '差速器', '分动箱'],
+    '电子电器': ['电脑板', 'ECU', '传感器', '开关', '线束', '保险丝', '继电器', '中控', '音响', '显示屏'],
+    '底盘悬挂': ['减震', '避震', '摆臂', '悬挂', '弹簧', '羊角', '轴承', '拉杆', '球头', '刹车', '制动'],
+    '发动机件': ['发动机', '缸盖', '缸体', '活塞', '曲轴', '涡轮', '增压器', '水泵', '油泵', '油底壳', '正时'],
+  };
+  for (const [cat, keys] of Object.entries(keywords)) {
+    if (keys.some(k => partName.includes(k))) return cat;
+  }
+  return '';
+};
+
 const categoryMap: Record<string, string> = {
   '照明系统': 'lighting',
   '外观覆盖件': 'appearance',
@@ -60,6 +87,10 @@ const categoryMap: Record<string, string> = {
 const transformUrgentOrders = (): UrgentPost[] => {
   return urgentOrders.map((order) => {
     const publisher = findUser(order.userId);
+    let category = normalizeCategory(order.category);
+    if (!category) {
+      category = classifyByPartName(order.title);
+    }
     return {
       id: order.id,
       publisherId: order.userId,
@@ -70,7 +101,7 @@ const transformUrgentOrders = (): UrgentPost[] => {
       quantity: order.quantity,
       description: order.description,
       images: order.images,
-      category: order.category,
+      category,
       createdAt: order.createdAt,
       expiresAt: order.deadline,
       status:
@@ -131,7 +162,7 @@ interface UrgentStoreState {
   getUrgentPostsByPublisher: (publisherId: string) => UrgentPost[];
   getUrgentPostsByStatus: (status: UrgentPost['status']) => UrgentPost[];
 
-  createUrgentPost: (data: Omit<UrgentPost, 'id' | 'publisherId' | 'publisher' | 'createdAt' | 'status' | 'relayList' | 'quotes' | 'category'> & { publisherId: string; category?: string }) => UrgentPost;
+  createUrgentPost: (data: Omit<UrgentPost, 'id' | 'publisherId' | 'publisher' | 'createdAt' | 'status' | 'relayList' | 'quotes'> & { publisherId: string; category?: string }) => UrgentPost;
   updateUrgentPost: (id: string, data: Partial<UrgentPost>) => void;
   deleteUrgentPost: (id: string) => void;
   setUrgentPostStatus: (id: string, status: UrgentPost['status']) => void;
@@ -191,6 +222,11 @@ export const useUrgentStore = create<UrgentStoreState>()(
 
       createUrgentPost: (data) => {
         const publisher = findUser(data.publisherId);
+        let category = data.category || '';
+        if (!category) {
+          category = classifyByPartName(data.partName);
+        }
+        category = normalizeCategory(category);
         const newPost: UrgentPost = {
           id: 'up_' + generateId(),
           publisherId: data.publisherId,
@@ -201,7 +237,7 @@ export const useUrgentStore = create<UrgentStoreState>()(
           quantity: data.quantity,
           description: data.description,
           images: data.images,
-          category: data.category || '',
+          category,
           createdAt: new Date().toISOString(),
           expiresAt: data.expiresAt,
           status: 'active',

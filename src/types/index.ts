@@ -104,6 +104,17 @@ export type OrderStatus =
   | 'disputing'
   | 'cancelled';
 
+export interface RelaySubOrderSnapshot {
+  subOrderId: string;
+  supplierId: string;
+  supplierName: string;
+  supplierAvatar: string;
+  quantity: number;
+  unitPrice: number;
+  amount: number;
+  status: OrderStatus;
+}
+
 export interface GuaranteeOrder {
   id: string;
   orderNo: string;
@@ -111,8 +122,9 @@ export interface GuaranteeOrder {
   buyer: User;
   supplierId: string;
   supplier: User;
-  sourceType: 'urgent' | 'stock';
+  sourceType: 'urgent' | 'stock' | 'relay';
   sourceId: string;
+  sourceQuoteId?: string;
   partInfo: PartSnapshot;
   totalAmount: number;
   depositAmount: number;
@@ -121,7 +133,10 @@ export interface GuaranteeOrder {
   status: OrderStatus;
   timeline: OrderTimelineItem[];
   relayOrderIds?: string[];
-  isRelayParent: boolean;
+  isRelayParent?: boolean;
+  relaySubOrders?: string[];
+  relaySummary?: { totalSuppliers: number; totalQty: number; totalAmount: number };
+  relaySubOrderSnapshots?: RelaySubOrderSnapshot[];
   adaptConfirm?: AdaptConfirm;
   dispute?: DisputeRecord;
   createdAt: string;
@@ -135,6 +150,7 @@ export interface PartSnapshot {
   unitPrice: number;
   conditionType: 'new' | 'used' | 'refurbished';
   images: string[];
+  quoteSnapshot?: Quote;
 }
 
 export interface OrderTimelineItem {

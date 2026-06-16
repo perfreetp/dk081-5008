@@ -39,7 +39,7 @@ import Button from '../../components/ui/Button';
 import Badge from '../../components/ui/Badge';
 import Card from '../../components/ui/Card';
 import { cn } from '../../lib/utils';
-import { AdaptConfirm, GuaranteeOrder, OrderStatus } from '../../types';
+import { AdaptConfirm, GuaranteeOrder, OrderStatus, Quote, RelaySubOrderSnapshot } from '../../types';
 
 const STATUS_HEADER_CONFIG: Record<
   OrderStatus,
@@ -126,12 +126,128 @@ type AdaptResult = 'fit' | 'wrong' | 'pending';
 
 interface SubOrderItem {
   id: string;
+  supplierId: string;
   supplierName: string;
   supplierAvatar: string;
+  supplierCity: string;
   partName: string;
+  quantity: number;
+  unitPrice: number;
   price: number;
   status: string;
   statusColor: string;
+  statusBadgeVariant: 'default' | 'success' | 'warning' | 'danger' | 'info';
+}
+
+const SUBORDER_STATUS_CONFIG: Record<OrderStatus, { label: string; color: string; variant: 'default' | 'success' | 'warning' | 'danger' | 'info' }> = {
+  pending_payment: { label: '待支付', color: 'bg-gray-100 text-gray-600', variant: 'default' },
+  deposited: { label: '定金已付', color: 'bg-amber-100 text-amber-600', variant: 'warning' },
+  preparing: { label: '备货中', color: 'bg-amber-100 text-amber-600', variant: 'warning' },
+  shipped: { label: '运输中', color: 'bg-blue-100 text-blue-600', variant: 'info' },
+  delivered: { label: '已签收', color: 'bg-indigo-100 text-indigo-600', variant: 'info' },
+  adapt_confirmed: { label: '适配通过', color: 'bg-emerald-100 text-emerald-600', variant: 'success' },
+  completed: { label: '已完成', color: 'bg-emerald-100 text-emerald-600', variant: 'success' },
+  disputing: { label: '争议中', color: 'bg-red-100 text-red-600', variant: 'danger' },
+  cancelled: { label: '已取消', color: 'bg-gray-100 text-gray-600', variant: 'default' },
+};
+
+function QuoteSnapshotCard({ quote }: { quote: Quote }) {
+  const renderStars = (rating: number) => {
+    const fullStars = Math.floor(rating);
+    const hasHalf = rating - fullStars >= 0.5;
+    return (
+      <div className="flex items-center gap-0.5">
+        {[...Array(5)].map((_, i) => (
+          <Star
+            key={i}
+            size={10}
+            className={cn(
+              i < fullStars
+                ? 'text-amber-400 fill-amber-400'
+                : i === fullStars && hasHalf
+                ? 'text-amber-400 fill-amber-400'
+                : 'text-gray-200'
+            )}
+          />
+        ))}
+      </div>
+    );
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-3">
+        <img
+          src={quote.supplier.avatar}
+          alt={quote.supplier.name}
+          className="w-10 h-10 rounded-full"
+        />
+        <div className="flex-1 min-w-0">
+          <div className="text-sm font-semibold text-gray-900 truncate">
+            {quote.supplier.name}
+          </div>
+          <div className="flex items-center gap-2 text-[11px] text-gray-500">
+            {renderStars(quote.supplier.reputation.starRating)}
+            <span>·</span>
+            <span>{quote.supplier.reputation.totalDeals}笔交易</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2">
+        <div className="p-2.5 rounded-xl bg-white border border-gray-100">
+          <div className="text-[10px] text-gray-400 mb-0.5">运总价</div>
+          <div className="text-base font-bold text-red-600">
+            ¥{quote.totalPrice.toFixed(0)}
+          </div>
+        </div>
+        <div className="p-2.5 rounded-xl bg-white border border-gray-100">
+          <div className="text-[10px] text-gray-400 mb-0.5">配件单价</div>
+          <div className="text-base font-bold text-gray-700">
+            ¥{quote.price.toFixed(0)}
+          </div>
+        </div>
+        <div className="p-2.5 rounded-xl bg-white border border-gray-100">
+          <div className="text-[10px] text-gray-400 mb-0.5">运费</div>
+          <div className="text-sm font-semibold text-gray-700">
+            ¥{quote.shippingFee.toFixed(0)}
+          </div>
+        </div>
+        <div className="p-2.5 rounded-xl bg-white border border-gray-100">
+          <div className="text-[10px] text-gray-400 mb-0.5">来源城市</div>
+          <div className="text-sm font-semibold text-gray-700 flex items-center gap-1">
+            <MapPin size={11} className="text-blue-500" />
+            {quote.sourceCity}
+          </div>
+        </div>
+      </div>
+
+      <div className="flex flex-wrap gap-1.5">
+        {quote.canShipToday && (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-green-100 text-green-600 text-[10px] font-bold">
+            <Truck size={10} />
+            当天发车
+          </span>
+        )}
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-blue-50 text-blue-600 text-[10px] font-medium">
+          距离 {quote.distanceKm.toFixed(0)}km
+        </span>
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-purple-50 text-purple-600 text-[10px] font-medium">
+          <Shield size={10} />
+          {quote.warrantyDays > 0 ? `${quote.warrantyDays}天质保` : '无质保'}
+        </span>
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-gray-100 text-gray-600 text-[10px] font-medium">
+          {(quote.supplier.reputation.positiveRate * 100).toFixed(0)}% 履约率
+        </span>
+      </div>
+
+      {quote.remark && (
+        <div className="p-2.5 rounded-xl bg-amber-50 border border-amber-100">
+          <p className="text-xs text-amber-700 italic">"{quote.remark}"</p>
+        </div>
+      )}
+    </div>
+  );
 }
 
 export default function OrderDetail() {
@@ -165,16 +281,59 @@ export default function OrderDetail() {
   );
 
   const subOrders: SubOrderItem[] = useMemo(() => {
-    if (!order?.isRelayParent || !order?.relayOrderIds?.length) return [];
-    return order.relayOrderIds.map((oid, i) => ({
-      id: oid,
-      supplierName: ['陈记汽配', '老王拆车件', '广州速配', '深圳汽配仓'][i % 4],
-      supplierAvatar: ['陈', '王', '速', '深'][i % 4],
-      partName: order.partInfo.partName,
-      price: Math.round(order.partInfo.unitPrice * (0.85 + (i % 3) * 0.1)),
-      status: (['已发货', '备货中', '已签收', '运输中'] as const)[i % 4],
-      statusColor: (['bg-blue-100 text-blue-600', 'bg-amber-100 text-amber-600', 'bg-emerald-100 text-emerald-600', 'bg-indigo-100 text-indigo-600'] as const)[i % 4],
-    }));
+    if (!order?.isRelayParent) return [];
+    
+    const snapshots = order.relaySubOrderSnapshots || [];
+    if (snapshots.length > 0) {
+      return snapshots.map((snap: RelaySubOrderSnapshot) => {
+        const statusConfig = SUBORDER_STATUS_CONFIG[snap.status];
+        const subOrder = getOrderById(snap.subOrderId);
+        return {
+          id: snap.subOrderId,
+          supplierId: snap.supplierId,
+          supplierName: snap.supplierName,
+          supplierAvatar: snap.supplierAvatar,
+          supplierCity: subOrder?.supplier.city || '',
+          partName: order.partInfo.partName,
+          quantity: snap.quantity,
+          unitPrice: snap.unitPrice,
+          price: snap.amount,
+          status: statusConfig.label,
+          statusColor: statusConfig.color,
+          statusBadgeVariant: statusConfig.variant,
+        };
+      });
+    }
+    
+    const relayIds = order.relayOrderIds || order.relaySubOrders || [];
+    return relayIds.map((oid) => {
+      const subOrder = getOrderById(oid);
+      const status = subOrder?.status || 'pending_payment';
+      const statusConfig = SUBORDER_STATUS_CONFIG[status];
+      return {
+        id: oid,
+        supplierId: subOrder?.supplierId || '',
+        supplierName: subOrder?.supplier.name || '未知供应商',
+        supplierAvatar: subOrder?.supplier.avatar || '',
+        supplierCity: subOrder?.supplier.city || '',
+        partName: order.partInfo.partName,
+        quantity: subOrder?.partInfo.quantity || 1,
+        unitPrice: subOrder?.partInfo.unitPrice || 0,
+        price: subOrder?.totalAmount || 0,
+        status: statusConfig.label,
+        statusColor: statusConfig.color,
+        statusBadgeVariant: statusConfig.variant,
+      };
+    });
+  }, [order, getOrderById]);
+
+  const parentOrder = useMemo(() => {
+    if (order?.isRelayParent) return null;
+    const allOrders = useOrderStore.getState().orders;
+    return allOrders.find(o => 
+      o.isRelayParent && 
+      (o.relayOrderIds?.includes(order!.id) || o.relaySubOrders?.includes(order!.id))
+    );
   }, [order]);
 
   const finalPayment = useMemo(() => {
@@ -272,14 +431,29 @@ export default function OrderDetail() {
               {headerConfig.icon}
             </motion.div>
             <div className="flex-1 min-w-0">
-              <motion.h1
-                initial={{ opacity: 0, x: -10 }}
-                animate={{ opacity: 1, x: 0 }}
-                transition={{ delay: 0.15 }}
-                className="text-xl font-bold text-white mb-1"
-              >
-                {headerConfig.title}
-              </motion.h1>
+              <div className="flex items-center gap-2 mb-1">
+                <motion.h1
+                  initial={{ opacity: 0, x: -10 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: 0.15 }}
+                  className="text-xl font-bold text-white"
+                >
+                  {headerConfig.title}
+                </motion.h1>
+                {order.isRelayParent && (
+                  <motion.div
+                    initial={{ scale: 0, opacity: 0 }}
+                    animate={{ scale: 1, opacity: 1 }}
+                    transition={{ delay: 0.25, type: 'spring' }}
+                    className="px-2.5 py-1 rounded-full bg-white/20 backdrop-blur-sm border border-white/30"
+                  >
+                    <span className="text-[10px] font-bold text-white flex items-center gap-1">
+                      <Link2 size={10} />
+                      接龙担保订单
+                    </span>
+                  </motion.div>
+                )}
+              </div>
               <motion.p
                 initial={{ opacity: 0, x: -10 }}
                 animate={{ opacity: 1, x: 0 }}
@@ -325,6 +499,70 @@ export default function OrderDetail() {
       </motion.div>
 
       <div className="px-4 -mt-10 space-y-3">
+        {parentOrder && (
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="p-3 rounded-2xl bg-gradient-to-r from-indigo-50 to-violet-50 border border-indigo-100 flex items-center gap-3 cursor-pointer hover:from-indigo-100 hover:to-violet-100 transition-colors"
+            onClick={() => navigate(`/order/${parentOrder.id}`)}
+          >
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-500 to-violet-500 flex items-center justify-center flex-shrink-0">
+              <Link2 size={16} className="text-white" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="text-xs font-semibold text-indigo-700 flex items-center gap-1.5">
+                归属接龙主订单
+                <Badge variant="info" size="sm">
+                  {parentOrder.relaySummary?.totalSuppliers || 0}家供应商
+                </Badge>
+              </div>
+              <div className="text-[11px] text-indigo-500 font-mono mt-0.5">
+                {parentOrder.orderNo}
+              </div>
+            </div>
+            <ChevronRight size={16} className="text-indigo-400 flex-shrink-0" />
+          </motion.div>
+        )}
+
+        {order.isRelayParent && order.relaySummary && (
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.1 }}
+          >
+            <Card padding="md" className="bg-gradient-to-br from-indigo-50/50 to-violet-50/50 border-indigo-100">
+              <div className="flex items-center gap-2 mb-3">
+                <div className="w-6 h-6 rounded-lg bg-gradient-to-br from-indigo-500 to-violet-500 flex items-center justify-center">
+                  <Users size={12} className="text-white" />
+                </div>
+                <h3 className="text-sm font-semibold text-gray-900">接龙汇总</h3>
+              </div>
+              <div className="grid grid-cols-3 gap-3">
+                <div className="text-center p-2.5 rounded-xl bg-white">
+                  <div className="text-[10px] text-gray-400 mb-0.5">供应商数</div>
+                  <div className="text-lg font-bold text-indigo-600">
+                    {order.relaySummary.totalSuppliers}
+                    <span className="text-[10px] font-normal text-gray-400 ml-0.5">家</span>
+                  </div>
+                </div>
+                <div className="text-center p-2.5 rounded-xl bg-white">
+                  <div className="text-[10px] text-gray-400 mb-0.5">总数量</div>
+                  <div className="text-lg font-bold text-violet-600">
+                    {order.relaySummary.totalQty}
+                    <span className="text-[10px] font-normal text-gray-400 ml-0.5">件</span>
+                  </div>
+                </div>
+                <div className="text-center p-2.5 rounded-xl bg-white">
+                  <div className="text-[10px] text-gray-400 mb-0.5">总金额</div>
+                  <div className="text-lg font-bold text-accent-500">
+                    ¥{order.relaySummary.totalAmount}
+                  </div>
+                </div>
+              </div>
+            </Card>
+          </motion.div>
+        )}
+
         <Card padding="md">
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center gap-2">
@@ -430,6 +668,24 @@ export default function OrderDetail() {
             </div>
           )}
         </Card>
+
+        {order.partInfo.quoteSnapshot && (
+          <Card padding="md" className="border-2 border-orange-200 bg-gradient-to-br from-orange-50/50 to-amber-50/50">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <div className="w-6 h-6 rounded-lg bg-orange-100 flex items-center justify-center">
+                  <Sparkles size={12} className="text-orange-600" />
+                </div>
+                <h3 className="text-sm font-semibold text-gray-900">本次报价快照</h3>
+              </div>
+              <Badge variant="warning" size="sm">
+                采纳时快照
+              </Badge>
+            </div>
+
+            <QuoteSnapshotCard quote={order.partInfo.quoteSnapshot} />
+          </Card>
+        )}
 
         <Card padding="md">
           <h3 className="text-sm font-semibold text-gray-900 mb-4">交易双方</h3>
@@ -620,20 +876,33 @@ export default function OrderDetail() {
                         animate={{ opacity: 1, x: 0 }}
                         transition={{ delay: idx * 0.05 }}
                         className="flex items-center gap-3 p-3 rounded-xl bg-gray-50 hover:bg-gray-100 transition-colors cursor-pointer"
+                        onClick={() => navigate(`/order/${sub.id}`)}
                       >
-                        <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-400 to-violet-500 flex items-center justify-center text-white font-bold flex-shrink-0">
-                          {sub.supplierAvatar}
+                        <div className="flex-shrink-0 relative">
+                          <img
+                            src={sub.supplierAvatar}
+                            alt={sub.supplierName}
+                            className="w-10 h-10 rounded-xl border border-gray-200"
+                          />
                         </div>
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 mb-0.5">
                             <span className="text-xs font-semibold text-gray-800 truncate">
                               {sub.supplierName}
                             </span>
-                            <span className={cn('flex-shrink-0 text-[10px] px-1.5 py-0.5 rounded font-medium', sub.statusColor)}>
+                            <Badge variant={sub.statusBadgeVariant} size="sm">
                               {sub.status}
-                            </span>
+                            </Badge>
                           </div>
-                          <p className="text-[11px] text-gray-500 truncate">{sub.partName}</p>
+                          <div className="flex items-center gap-2 text-[11px] text-gray-500 mb-1">
+                            <MapPin size={9} className="text-gray-400" />
+                            <span>{sub.supplierCity}</span>
+                            <span className="text-gray-300">·</span>
+                            <span>x{sub.quantity}件</span>
+                            <span className="text-gray-300">·</span>
+                            <span>单价 ¥{sub.unitPrice}</span>
+                          </div>
+                          <p className="text-[11px] text-gray-400 truncate">{sub.partName}</p>
                         </div>
                         <div className="text-right flex-shrink-0">
                           <div className="text-sm font-bold text-accent-500">¥{sub.price}</div>

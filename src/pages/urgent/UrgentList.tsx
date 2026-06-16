@@ -24,6 +24,14 @@ import { UrgentPost } from '../../types';
 
 type FilterCategory = 'all' | 'lighting' | 'appearance' | 'mechanical' | 'electronics' | 'chassis' | 'engine';
 type SortType = 'latest' | 'urgent' | 'nearby' | 'mostQuoted';
+type StatusTab = 'all' | 'active' | 'quoted' | 'completed';
+
+const statusTabs: { key: StatusTab; label: string }[] = [
+  { key: 'all', label: '全部' },
+  { key: 'active', label: '招募中' },
+  { key: 'quoted', label: '进行中' },
+  { key: 'completed', label: '已完成' },
+];
 
 const categoryFilters: { key: FilterCategory; label: string }[] = [
   { key: 'all', label: '全部' },
@@ -51,6 +59,7 @@ export default function UrgentList() {
   const [activeCategory, setActiveCategory] = useState<FilterCategory>('all');
   const [activeSort, setActiveSort] = useState<SortType>('latest');
   const [showFilterPanel, setShowFilterPanel] = useState(false);
+  const [statusTab, setStatusTab] = useState<StatusTab>('all');
   const [statusFilter, setStatusFilter] = useState<UrgentPost['status'] | 'all'>('all');
   const [hasRelay, setHasRelay] = useState(false);
   const [hasQuote, setHasQuote] = useState(false);
@@ -74,6 +83,7 @@ export default function UrgentList() {
         engine: '发动机件',
       };
       result = result.filter((p) => p.category === categoryKeyMap[activeCategory] || p.category === activeCategory);
+      result = result.filter((p) => p.status === 'active' || p.status === 'quoted');
     }
 
     if (searchQuery.trim()) {
@@ -86,6 +96,16 @@ export default function UrgentList() {
           p.carPlatform.brand.toLowerCase().includes(query) ||
           p.carPlatform.series.toLowerCase().includes(query)
       );
+    }
+
+    if (statusTab !== 'all') {
+      if (statusTab === 'active') {
+        result = result.filter((p) => p.status === 'active');
+      } else if (statusTab === 'quoted') {
+        result = result.filter((p) => p.status === 'quoted');
+      } else if (statusTab === 'completed') {
+        result = result.filter((p) => p.status === 'completed');
+      }
     }
 
     if (statusFilter !== 'all') {
@@ -119,7 +139,7 @@ export default function UrgentList() {
     }
 
     return result;
-  }, [urgentPosts, searchQuery, activeCategory, activeSort, statusFilter, hasRelay, hasQuote, user]);
+  }, [urgentPosts, searchQuery, activeCategory, activeSort, statusTab, statusFilter, hasRelay, hasQuote, user]);
 
   const activeFiltersCount =
     (statusFilter !== 'all' ? 1 : 0) + (hasRelay ? 1 : 0) + (hasQuote ? 1 : 0);
@@ -214,6 +234,25 @@ export default function UrgentList() {
               >
                 {cat.label}
               </Chip>
+            ))}
+          </div>
+        </div>
+
+        <div className="px-4 pb-3 border-t border-gray-50">
+          <div className="flex gap-4 overflow-x-auto scrollbar-hide">
+            {statusTabs.map((tab) => (
+              <button
+                key={tab.key}
+                onClick={() => setStatusTab(tab.key)}
+                className={cn(
+                  "flex items-center gap-1 py-2 text-xs font-medium whitespace-nowrap transition-colors border-b-2",
+                  statusTab === tab.key
+                    ? "text-primary-600 border-primary-500"
+                    : "text-gray-500 border-transparent hover:text-gray-700"
+                )}
+              >
+                {tab.label}
+              </button>
             ))}
           </div>
         </div>

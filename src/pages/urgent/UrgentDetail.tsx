@@ -46,6 +46,7 @@ import {
 
 type TabType = 'quotes' | 'relay';
 type PriceSortType = 'total' | 'price';
+type QuoteViewMode = 'list' | 'compare';
 
 const statusTextMap = {
   active: '紧急招募中',
@@ -180,6 +181,183 @@ function ImageCarousel({ images }: { images: string[] }) {
   );
 }
 
+function QuoteCompareView({
+  quotes,
+  selectedQuoteId,
+  onSelectQuote,
+  onAcceptQuote,
+  isPublisher,
+  onChat,
+}: {
+  quotes: Quote[];
+  selectedQuoteId: string | null;
+  onSelectQuote: (id: string) => void;
+  onAcceptQuote: (id: string) => void;
+  isPublisher: boolean;
+  onChat: () => void;
+}) {
+  const renderStars = (rating: number) => {
+    const fullStars = Math.floor(rating);
+    const hasHalf = rating - fullStars >= 0.5;
+    return (
+      <div className="flex items-center gap-0.5">
+        {[...Array(5)].map((_, i) => (
+          <Star
+            key={i}
+            size={10}
+            className={cn(
+              i < fullStars
+                ? 'text-amber-400 fill-amber-400'
+                : i === fullStars && hasHalf
+                ? 'text-amber-400 fill-amber-400'
+                : 'text-gray-200'
+            )}
+          />
+        ))}
+      </div>
+    );
+  };
+
+  if (quotes.length === 0) {
+    return (
+      <Card variant="outlined" padding="lg">
+        <div className="py-8 text-center">
+          <div className="w-16 h-16 mx-auto mb-3 rounded-2xl bg-gray-100 flex items-center justify-center">
+            <Truck size={28} className="text-gray-300" />
+          </div>
+          <h3 className="text-base font-semibold text-gray-700 mb-1">
+            暂无供应商报价
+          </h3>
+          <p className="text-sm text-gray-400">
+            {isPublisher ? '邀请供应商报价或稍等片刻' : '成为第一个报价的供应商'}
+          </p>
+        </div>
+      </Card>
+    );
+  }
+
+  return (
+    <div className="overflow-x-auto -mx-4 px-4">
+      <div className="min-w-[700px]">
+        <div className="sticky top-0 z-10 bg-gray-50 border-b border-gray-200">
+          <div className="grid grid-cols-8 gap-2 py-2 px-2 text-[10px] font-semibold text-gray-500">
+            <div className="col-span-1 text-center">运总价</div>
+            <div className="col-span-1 text-center">单价</div>
+            <div className="col-span-1 text-center">城市</div>
+            <div className="col-span-1 text-center">距离</div>
+            <div className="col-span-1 text-center">当天发车</div>
+            <div className="col-span-1 text-center">质保</div>
+            <div className="col-span-1 text-center">信誉</div>
+            <div className="col-span-1 text-center">操作</div>
+          </div>
+        </div>
+
+        <div className="space-y-2 py-2">
+          {quotes.map((quote, index) => {
+            const isSelected = selectedQuoteId === quote.id;
+            return (
+              <motion.div
+                key={quote.id}
+                initial={{ opacity: 0, x: -20 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ duration: 0.3, delay: index * 0.05 }}
+                onClick={() => onSelectQuote(quote.id)}
+                className={cn(
+                  'grid grid-cols-8 gap-2 items-center p-3 rounded-2xl border-2 cursor-pointer transition-all',
+                  isSelected
+                    ? 'border-orange-500 bg-orange-50/50 shadow-lg shadow-orange-500/10'
+                    : 'border-gray-100 bg-white hover:border-gray-200 hover:bg-gray-50'
+                )}
+              >
+                <div className="col-span-1 text-center">
+                  <div className="text-sm font-bold text-red-600">
+                    {formatPriceShort(quote.totalPrice)}
+                  </div>
+                  <div className="text-[9px] text-gray-400">含运费</div>
+                </div>
+
+                <div className="col-span-1 text-center">
+                  <div className="text-sm font-semibold text-gray-700">
+                    {formatPriceShort(quote.price)}
+                  </div>
+                  <div className="text-[9px] text-gray-400">不含运</div>
+                </div>
+
+                <div className="col-span-1 text-center">
+                  <div className="flex items-center justify-center gap-1">
+                    <MapPin size={10} className="text-blue-500" />
+                    <span className="text-xs font-medium text-gray-700 truncate">
+                      {quote.sourceCity}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="col-span-1 text-center">
+                  <span className="text-xs text-gray-600">
+                    {formatDistance(quote.distanceKm)}
+                  </span>
+                </div>
+
+                <div className="col-span-1 text-center">
+                  {quote.canShipToday ? (
+                    <span className="inline-flex items-center justify-center px-2 py-0.5 rounded-full bg-green-100 text-green-600 text-[10px] font-bold">
+                      当天发
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center justify-center px-2 py-0.5 rounded-full bg-gray-100 text-gray-500 text-[10px]">
+                      1-2天
+                    </span>
+                  )}
+                </div>
+
+                <div className="col-span-1 text-center">
+                  <span className="text-[10px] text-gray-700 font-medium">
+                    {quote.warrantyDays > 0 ? `${quote.warrantyDays}天` : '无'}
+                  </span>
+                </div>
+
+                <div className="col-span-1">
+                  <div className="flex flex-col items-center gap-0.5">
+                    {renderStars(quote.supplier.reputation.starRating)}
+                    <div className="text-[9px] text-gray-500">
+                      {(quote.supplier.reputation.positiveRate * 100).toFixed(0)}%
+                    </div>
+                  </div>
+                </div>
+
+                <div className="col-span-1 flex items-center justify-center gap-1">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onChat();
+                    }}
+                  >
+                    <MessageCircle size={14} />
+                  </Button>
+                  {isPublisher && (
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onAcceptQuote(quote.id);
+                      }}
+                    >
+                      采纳
+                    </Button>
+                  )}
+                </div>
+              </motion.div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function UrgentDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -191,6 +369,8 @@ export default function UrgentDetail() {
   const [priceSort, setPriceSort] = useState<PriceSortType>('total');
   const [showGuaranteeModal, setShowGuaranteeModal] = useState(false);
   const [selectedQuote, setSelectedQuote] = useState<Quote | null>(null);
+  const [quoteViewMode, setQuoteViewMode] = useState<QuoteViewMode>('list');
+  const [compareSelectedQuoteId, setCompareSelectedQuoteId] = useState<string | null>(null);
 
   useEffect(() => {
     fetchUrgentPosts();
@@ -490,6 +670,30 @@ export default function UrgentDetail() {
                     </div>
                     <div className="flex items-center gap-1 p-0.5 bg-gray-100 rounded-lg">
                       <button
+                        onClick={() => setQuoteViewMode('list')}
+                        className={cn(
+                          "px-2.5 h-7 rounded-md text-xs font-medium flex items-center gap-1 transition-all",
+                          quoteViewMode === 'list'
+                            ? "bg-white text-primary-600 shadow-sm"
+                            : "text-gray-500"
+                        )}
+                      >
+                        List
+                      </button>
+                      <button
+                        onClick={() => setQuoteViewMode('compare')}
+                        className={cn(
+                          "px-2.5 h-7 rounded-md text-xs font-medium flex items-center gap-1 transition-all",
+                          quoteViewMode === 'compare'
+                            ? "bg-white text-primary-600 shadow-sm"
+                            : "text-gray-500"
+                        )}
+                      >
+                        Compare
+                      </button>
+                    </div>
+                    <div className="flex items-center gap-1 p-0.5 bg-gray-100 rounded-lg">
+                      <button
                         onClick={() => setPriceSort('total')}
                         className={cn(
                           "px-2.5 h-7 rounded-md text-xs font-medium flex items-center gap-1 transition-all",
@@ -538,21 +742,49 @@ export default function UrgentDetail() {
                   </div>
                 </Card>
               ) : (
-                <div className="space-y-3">
-                  {sortedQuotes.map((quote, i) => (
-                    <QuoteItem
-                      key={quote.id}
-                      quote={quote}
-                      index={i}
-                      sortBy={priceSort}
-                      isAccepted={
-                        post.status === 'locked' && i === 0
-                      }
-                      onAccept={isPublisher ? () => handleAcceptQuote(quote.id) : undefined}
-                      onChat={handleChat}
-                    />
-                  ))}
-                </div>
+                <AnimatePresence mode="wait">
+                  {quoteViewMode === 'list' ? (
+                    <motion.div
+                      key="list-view"
+                      initial={{ opacity: 0, x: -20 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      exit={{ opacity: 0, x: 20 }}
+                      transition={{ duration: 0.3 }}
+                      className="space-y-3"
+                    >
+                      {sortedQuotes.map((quote, i) => (
+                        <QuoteItem
+                          key={quote.id}
+                          quote={quote}
+                          index={i}
+                          sortBy={priceSort}
+                          isAccepted={
+                            post.status === 'locked' && i === 0
+                          }
+                          onAccept={isPublisher ? () => handleAcceptQuote(quote.id) : undefined}
+                          onChat={handleChat}
+                        />
+                      ))}
+                    </motion.div>
+                  ) : (
+                    <motion.div
+                      key="compare-view"
+                      initial={{ opacity: 0, x: 20 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      exit={{ opacity: 0, x: -20 }}
+                      transition={{ duration: 0.3 }}
+                    >
+                      <QuoteCompareView
+                        quotes={sortedQuotes}
+                        selectedQuoteId={compareSelectedQuoteId}
+                        onSelectQuote={setCompareSelectedQuoteId}
+                        onAcceptQuote={handleAcceptQuote}
+                        isPublisher={isPublisher}
+                        onChat={handleChat}
+                      />
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               )}
             </motion.div>
           ) : (
@@ -725,6 +957,7 @@ export default function UrgentDetail() {
                         supplierId: selectedQuote.supplierId,
                         sourceType: 'urgent',
                         sourceId: post.id,
+                        sourceQuoteId: selectedQuote.id,
                         partInfo: {
                           partName: post.partName,
                           partNumber: post.partNumber,
@@ -733,6 +966,7 @@ export default function UrgentDetail() {
                           unitPrice: selectedQuote.price,
                           conditionType: selectedQuote.conditionType,
                           images: post.images,
+                          quoteSnapshot: selectedQuote,
                         },
                         totalAmount: totalPrice,
                         depositAmount: Math.round(totalPrice * 0.3),

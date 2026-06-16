@@ -121,6 +121,7 @@ interface MessageStoreState {
   getTotalUnreadCount: () => number;
 
   createSession: (participants: string[], type?: 'private' | 'group', groupInfo?: Partial<GroupInfo>) => ExtendedChatSession;
+  createSessionByParticipants: (userIds: string[]) => ExtendedChatSession;
   updateSession: (sessionId: string, data: Partial<ChatSession>) => void;
   deleteSession: (sessionId: string) => void;
   togglePinSession: (sessionId: string) => void;
@@ -282,6 +283,10 @@ export const useMessageStore = create<MessageStoreState>()(
         }));
 
         return newSession;
+      },
+
+      createSessionByParticipants: (userIds) => {
+        return get().createSession(userIds, 'private');
       },
 
       updateSession: (sessionId, data) => {

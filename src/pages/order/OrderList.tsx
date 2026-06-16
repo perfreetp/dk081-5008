@@ -18,8 +18,10 @@ import {
   FileText,
   Coins,
   Link2,
+  Lock,
+  Sparkles,
 } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useOrderStore } from '../../stores/orderStore';
 import { useAuthStore } from '../../stores/authStore';
 import Chip from '../../components/ui/Chip';
@@ -30,6 +32,7 @@ import { cn } from '../../lib/utils';
 import { GuaranteeOrder, OrderStatus } from '../../types';
 
 type TabKey = 'pending_payment' | 'pending_ship' | 'pending_confirm' | 'completed' | 'dispute';
+type SourceType = 'all' | 'urgent' | 'stock' | 'relay';
 
 interface TabConfig {
   key: TabKey;
@@ -38,6 +41,15 @@ interface TabConfig {
   statuses: OrderStatus[];
   color: string;
   activeBg: string;
+}
+
+interface SourceTabConfig {
+  key: SourceType;
+  label: string;
+  icon: React.ReactNode;
+  color: string;
+  activeBg: string;
+  activeColor: string;
 }
 
 const TABS: TabConfig[] = [
@@ -83,6 +95,41 @@ const TABS: TabConfig[] = [
   },
 ];
 
+const SOURCE_TABS: SourceTabConfig[] = [
+  {
+    key: 'all',
+    label: '全部',
+    icon: <Filter size={12} />,
+    color: 'text-gray-500',
+    activeBg: 'bg-gray-100',
+    activeColor: 'text-gray-700',
+  },
+  {
+    key: 'urgent',
+    label: '急件来源',
+    icon: <AlertTriangle size={12} />,
+    color: 'text-orange-500',
+    activeBg: 'bg-orange-100',
+    activeColor: 'text-orange-600',
+  },
+  {
+    key: 'stock',
+    label: '现货来源',
+    icon: <Package size={12} />,
+    color: 'text-blue-500',
+    activeBg: 'bg-blue-100',
+    activeColor: 'text-blue-600',
+  },
+  {
+    key: 'relay',
+    label: '接龙来源',
+    icon: <Users size={12} />,
+    color: 'text-green-500',
+    activeBg: 'bg-green-100',
+    activeColor: 'text-green-600',
+  },
+];
+
 const STATUS_BADGE: Record<OrderStatus, { label: string; variant: 'default' | 'success' | 'warning' | 'danger' | 'info' }> = {
   pending_payment: { label: '待支付定金', variant: 'default' },
   deposited: { label: '定金已付', variant: 'warning' },
@@ -105,14 +152,41 @@ function OrderCard({
   order,
   index,
   onClick,
+  isHighlighted = false,
 }: {
   order: GuaranteeOrder;
   index: number;
   onClick: () => void;
+  isHighlighted?: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
   const badge = STATUS_BADGE[order.status];
   const isBuyer = true;
+
+  const getSourceIcon = () => {
+    switch (order.sourceType) {
+      case 'urgent':
+        return (
+          <span className="w-5 h-5 rounded-lg bg-gradient-to-br from-orange-400 to-red-500 flex items-center justify-center text-white text-[10px] font-bold">
+            急
+          </span>
+        );
+      case 'stock':
+        return (
+          <span className="w-5 h-5 rounded-lg bg-gradient-to-br from-blue-400 to-indigo-500 flex items-center justify-center text-white text-[10px] font-bold">
+            现
+          </span>
+        );
+      case 'relay':
+        return (
+          <span className="w-5 h-5 rounded-lg bg-gradient-to-br from-green-400 to-emerald-500 flex items-center justify-center text-white text-[10px] font-bold">
+            接
+          </span>
+        );
+      default:
+        return null;
+    }
+  };
 
   const subOrders = useMemo(() => {
     if (!order.isRelayParent || !order.relayOrderIds?.length) return [];
@@ -130,20 +204,29 @@ function OrderCard({
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: index * 0.06, duration: 0.3 }}
+      className={cn(isHighlighted && 'scale-[1.02] z-10')}
     >
-      <Card padding="none" className="overflow-hidden">
+      <Card
+        padding="none"
+        className={cn(
+          'overflow-hidden transition-all',
+          isHighlighted && 'ring-4 ring-orange-400/30 border-2 border-orange-400',
+          order.sourceType === 'relay' && 'border-indigo-200 bg-gradient-to-br from-white to-indigo-50/30'
+        )}
+      >
         <div onClick={onClick} className="cursor-pointer">
           <div className="flex items-center justify-between px-4 pt-4 pb-2">
             <div className="flex items-center gap-2">
               <span className="text-[11px] text-gray-400 font-mono">{order.orderNo}</span>
-              {order.isRelayParent && (
-                <Badge variant="info" size="sm" icon={<Users size={10} />}>
-                  接龙 {order.relayOrderIds?.length || 0}家
+              {getSourceIcon()}
+              {order.sourceType === 'relay' && (
+                <Badge variant="info" size="sm" icon={<Link2 size={10} />}>
+                  接龙
                 </Badge>
               )}
-              {order.sourceType === 'urgent' && (
-                <Badge variant="urgent" size="sm" dot>
-                  急件来源
+              {order.isRelayParent && (
+                <Badge variant="default" size="sm" className="bg-indigo-100 text-indigo-700 border-indigo-200">
+                  {order.relayOrderIds?.length || order.relaySubOrders?.length || 0}家供应商
                 </Badge>
               )}
             </div>
@@ -339,23 +422,49 @@ function OrderCard({
 
 export default function OrderList() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { orders, fetchOrders, isLoading } = useOrderStore();
   const { user } = useAuthStore();
 
   const [activeTab, setActiveTab] = useState<TabKey>('pending_ship');
+  const [activeSourceTab, setActiveSourceTab] = useState<SourceType>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [showFilter, setShowFilter] = useState(false);
   const [onlyRelay, setOnlyRelay] = useState(false);
   const [onlyUrgent, setOnlyUrgent] = useState(false);
   const [timeRange, setTimeRange] = useState<'all' | '7d' | '30d' | '90d'>('all');
 
+  const highlightOrderId = (location.state as { highlightOrderId?: string })?.highlightOrderId;
+
   useEffect(() => {
     fetchOrders();
   }, [fetchOrders]);
 
+  const sortedOrders = useMemo(() => {
+    return [...orders].sort(
+      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
+  }, [orders]);
+
+  const latestOrder = useMemo(() => {
+    return sortedOrders[0] || null;
+  }, [sortedOrders]);
+
+  const pendingPaymentCount = useMemo(() => {
+    return orders.filter((o) => o.status === 'pending_payment').length;
+  }, [orders]);
+
+  const preparingCount = useMemo(() => {
+    return orders.filter((o) => o.status === 'preparing' || o.status === 'deposited').length;
+  }, [orders]);
+
   const filteredOrders = useMemo(() => {
     const activeTabConfig = TABS.find((t) => t.key === activeTab)!;
     let result = orders.filter((o) => activeTabConfig.statuses.includes(o.status));
+
+    if (activeSourceTab !== 'all') {
+      result = result.filter((o) => o.sourceType === activeSourceTab);
+    }
 
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
@@ -381,7 +490,7 @@ export default function OrderList() {
     return result.sort(
       (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
     );
-  }, [orders, activeTab, searchQuery, onlyRelay, onlyUrgent, timeRange]);
+  }, [orders, activeTab, activeSourceTab, searchQuery, onlyRelay, onlyUrgent, timeRange]);
 
   const tabCounts = useMemo(() => {
     const counts: Record<TabKey, number> = {
@@ -537,6 +646,26 @@ export default function OrderList() {
 
         <div className="px-4 pb-2 overflow-x-auto scrollbar-hide">
           <div className="flex gap-1 min-w-max">
+            {SOURCE_TABS.map((tab) => (
+              <button
+                key={tab.key}
+                onClick={() => setActiveSourceTab(tab.key)}
+                className={cn(
+                  'flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium transition-all whitespace-nowrap',
+                  activeSourceTab === tab.key
+                    ? cn(tab.activeBg, tab.activeColor, 'shadow-sm')
+                    : cn(tab.color, 'hover:bg-gray-50')
+                )}
+              >
+                {tab.icon}
+                <span>{tab.label}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="px-4 pb-3 overflow-x-auto scrollbar-hide">
+          <div className="flex gap-1 min-w-max">
             {TABS.map((tab) => (
               <button
                 key={tab.key}
@@ -575,6 +704,117 @@ export default function OrderList() {
       </motion.div>
 
       <div className="px-4 py-3 space-y-3">
+        <div className="flex gap-2">
+          {pendingPaymentCount > 0 && (
+            <motion.button
+              initial={{ scale: 0.8, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              onClick={() => setActiveTab('pending_payment')}
+              className="flex items-center gap-2 px-3 py-2 rounded-xl bg-red-50 border border-red-200 hover:bg-red-100 transition-colors"
+            >
+              <div className="relative">
+                <Coins size={14} className="text-red-600" />
+                <span className="absolute -top-1 -right-1 w-3 h-3 bg-red-500 rounded-full flex items-center justify-center text-white text-[8px] font-bold">
+                  {pendingPaymentCount}
+                </span>
+              </div>
+              <span className="text-xs font-medium text-red-700">待支付定金</span>
+            </motion.button>
+          )}
+          {preparingCount > 0 && (
+            <motion.button
+              initial={{ scale: 0.8, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              transition={{ delay: 0.1 }}
+              onClick={() => setActiveTab('pending_ship')}
+              className="flex items-center gap-2 px-3 py-2 rounded-xl bg-orange-50 border border-orange-200 hover:bg-orange-100 transition-colors"
+            >
+              <div className="relative">
+                <Lock size={14} className="text-orange-600" />
+                <span className="absolute -top-1 -right-1 w-3 h-3 bg-orange-500 rounded-full flex items-center justify-center text-white text-[8px] font-bold">
+                  {preparingCount}
+                </span>
+              </div>
+              <span className="text-xs font-medium text-orange-700">锁货中</span>
+            </motion.button>
+          )}
+        </div>
+
+        {latestOrder && !highlightOrderId && (
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4 }}
+          >
+            <Card
+              padding="none"
+              className="overflow-hidden border-2 border-transparent bg-gradient-to-r from-orange-100 via-amber-50 to-orange-100"
+              style={{
+                backgroundImage: 'linear-gradient(white, white), linear-gradient(90deg, #f97316, #fbbf24, #f97316)',
+                backgroundOrigin: 'border-box',
+                backgroundClip: 'padding-box, border-box',
+              }}
+            >
+              <div
+                onClick={() => handleCardClick(latestOrder.id, latestOrder.status)}
+                className="cursor-pointer p-4"
+              >
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-gradient-to-r from-orange-500 to-amber-500 text-white text-[10px] font-bold">
+                      <Sparkles size={10} />
+                      刚创建
+                    </span>
+                    <span className="text-[11px] text-gray-500 font-mono">
+                      {latestOrder.orderNo}
+                    </span>
+                  </div>
+                  <Badge variant={STATUS_BADGE[latestOrder.status].variant} size="sm" dot>
+                    {STATUS_BADGE[latestOrder.status].label}
+                  </Badge>
+                </div>
+
+                <div className="flex gap-3">
+                  <div className="relative w-16 h-16 rounded-xl overflow-hidden bg-gray-100 flex-shrink-0">
+                    {latestOrder.partInfo.images?.[0] ? (
+                      <img
+                        src={latestOrder.partInfo.images[0]}
+                        alt={latestOrder.partInfo.partName}
+                        className="w-full h-full object-cover"
+                      />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center text-gray-300">
+                        <FileText size={20} />
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex-1 min-w-0">
+                    <h3 className="text-sm font-semibold text-gray-900 line-clamp-1 mb-1">
+                      {latestOrder.partInfo.partName}
+                    </h3>
+                    <div className="flex items-center gap-2 text-[11px] text-gray-500 mb-1">
+                      <span>{latestOrder.partInfo.carPlatform.brand}</span>
+                      <span className="text-gray-200">·</span>
+                      <span>x{latestOrder.partInfo.quantity}</span>
+                    </div>
+                    <div className="flex items-baseline gap-1">
+                      <span className="text-[10px] text-gray-400">总额</span>
+                      <span className="text-lg font-bold text-accent-500">
+                        ¥{latestOrder.totalAmount.toFixed(0)}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-1 text-[11px] text-primary-600 font-medium">
+                    查看详情
+                    <ChevronRight size={12} />
+                  </div>
+                </div>
+              </div>
+            </Card>
+          </motion.div>
+        )}
         {activeFiltersCount > 0 && (
           <motion.div
             initial={{ opacity: 0, height: 0 }}
@@ -694,6 +934,7 @@ export default function OrderList() {
                   order={order}
                   index={index}
                   onClick={() => handleCardClick(order.id, order.status)}
+                  isHighlighted={highlightOrderId === order.id}
                 />
               ))}
             </motion.div>

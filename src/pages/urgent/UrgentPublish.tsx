@@ -17,19 +17,39 @@ import {
   Volume2,
   Pause,
   Play,
+  CheckCircle,
+  MessageCircle,
+  HandCoins,
+  Star,
+  MapPin,
+  Truck,
+  Check,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useVoiceInput } from '../../hooks/useVoiceInput';
 import { useUrgentStore } from '../../stores/urgentStore';
 import { useAuthStore } from '../../stores/authStore';
+import { useStockStore } from '../../stores/stockStore';
+import { useMessageStore } from '../../stores/messageStore';
+import { useReputationStore } from '../../stores/reputationStore';
 import Card from '../../components/ui/Card';
 import Chip from '../../components/ui/Chip';
 import Button from '../../components/ui/Button';
 import Badge from '../../components/ui/Badge';
 import { cn } from '../../lib/utils';
-import { CarPlatform } from '../../types';
+import { CarPlatform, UrgentPost, StockItem, User } from '../../types';
 
 const carBrands = ['宝马', '奔驰', '奥迪', '大众', '丰田', '本田', '日产', '特斯拉', '比亚迪', '保时捷', '路虎', '别克'];
+
+const categoryOptions = [
+  { value: '', label: '自动识别' },
+  { value: '照明系统', label: '照明系统' },
+  { value: '外观覆盖', label: '外观覆盖' },
+  { value: '机械传动', label: '机械传动' },
+  { value: '电子电器', label: '电子电器' },
+  { value: '底盘悬挂', label: '底盘悬挂' },
+  { value: '发动机件', label: '发动机件' },
+];
 
 const deadlineOptions = [
   { label: '30分钟内', minutes: 30, urgent: true },
@@ -48,6 +68,7 @@ interface PublishForm {
   description: string;
   deadlineMinutes: number;
   images: string[];
+  category: string;
 }
 
 const sampleImages = [
@@ -129,7 +150,8 @@ export default function UrgentPublish() {
   const { createUrgentPost } = useUrgentStore();
   const { user } = useAuthStore();
 
-  const [step, setStep] = useState<'voice' | 'form'>('voice');
+  const [step, setStep] = useState<'voice' | 'form' | 'success'>('voice');
+  const [publishedPost, setPublishedPost] = useState<any>(null);
   const [form, setForm] = useState<PublishForm>({
     carPlatform: { brand: '', series: '', year: '', model: '' },
     partName: '',
@@ -138,6 +160,7 @@ export default function UrgentPublish() {
     description: '',
     deadlineMinutes: 30,
     images: [],
+    category: '',
   });
   const [selectedBrand, setSelectedBrand] = useState<string>('');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -225,8 +248,10 @@ export default function UrgentPublish() {
         description: form.description || form.partName,
         images: form.images,
         expiresAt,
+        category: form.category,
       });
-      navigate(`/urgent/${newPost.id}`, { replace: true });
+      setPublishedPost(newPost);
+      setStep('success');
     } catch (error) {
       console.error('发布失败:', error);
       alert('发布失败，请重试');
@@ -236,6 +261,16 @@ export default function UrgentPublish() {
   };
 
   const canSubmit = form.partName.trim() && selectedBrand;
+
+  if (step === 'success' && publishedPost) {
+    return (
+      <UrgentPublishSuccess
+        post={publishedPost}
+        onViewDetail={() => navigate(`/urgent/${publishedPost.id}`, { replace: true })}
+        onBackToList={() => navigate('/urgent', { replace: true })}
+      />
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gray-50 pb-28">
@@ -535,6 +570,21 @@ export default function UrgentPublish() {
                     </div>
 
                     <div>
+                      <label className="text-xs text-gray-500 mb-1.5 block">配件分类</label>
+                      <select
+                        value={form.category}
+                        onChange={(e) => setForm((prev) => ({ ...prev, category: e.target.value }))}
+                        className="w-full h-11 px-4 bg-gray-50 rounded-xl text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-primary-500/30 focus:bg-white transition-all border border-transparent focus:border-primary-200 appearance-none"
+                      >
+                        {categoryOptions.map((opt) => (
+                          <option key={opt.value} value={opt.value}>
+                            {opt.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
                       <label className="text-xs text-gray-500 mb-1.5 block">OE零件号（可选）</label>
                       <input
                         type="text"
@@ -718,6 +768,298 @@ export default function UrgentPublish() {
           </Button>
         </div>
       </motion.div>
+    </div>
+  );
+}
+
+interface RecommendedSupplier {
+  stockItem: StockItem;
+  score: number;
+  matchReasons: string[];
+}
+
+function RecommendedSuppliers({ post }: { post: UrgentPost }) {
+  const navigate = useNavigate();
+  const { stockItems } = useStockStore();
+  const { createSessionByParticipants, sendMessage } = useMessageStore();
+  const { user } = useAuthStore();
+
+  const recommendedSuppliers = useMemo(() => {
+    const suppliers: RecommendedSupplier[] = [];
+    const seenSupplierIds = new Set<string>();
+
+    stockItems.forEach((stockItem) => {
+      if (seenSupplierIds.has(stockItem.supplierId)) return;
+      if (user && stockItem.supplierId === user.id) return;
+
+      let score = 0;
+      const matchReasons: string[] = [];
+
+      if (stockItem.carPlatform.brand === post.carPlatform.brand) {
+        score += 30;
+        matchReasons.push('同品牌');
+      }
+
+      if (stockItem.tags.includes(post.category) || stockItem.partName.includes(post.partName)) {
+        score += 20;
+        matchReasons.push('同分类');
+      }
+
+      if (stockItem.stockQty > 0) {
+        score += 10;
+        matchReasons.push('有现货');
+      }
+
+      if (stockItem.canShipToday) {
+        score += 50;
+        matchReasons.push('当天可发');
+      }
+
+      const reputationScore = Math.min(30, stockItem.supplier.reputation.starRating * 6);
+      score += reputationScore;
+
+      if (score > 0) {
+        seenSupplierIds.add(stockItem.supplierId);
+        suppliers.push({ stockItem, score, matchReasons });
+      }
+    });
+
+    return suppliers.sort((a, b) => b.score - a.score).slice(0, 6);
+  }, [stockItems, post, user]);
+
+  const handleChat = (supplierId: string) => {
+    if (!user) return;
+    const session = createSessionByParticipants([user.id, supplierId]);
+    navigate(`/message/${session.id}`);
+  };
+
+  const handleInviteQuote = (supplierId: string, supplierName: string) => {
+    if (!user) return;
+    const session = createSessionByParticipants([user.id, supplierId]);
+    const message = `【邀请报价】我发布了一个急件：${post.partName}（${post.carPlatform.brand} ${post.carPlatform.series}），数量 ${post.quantity} 个，截止时间 ${new Date(post.expiresAt).toLocaleString()}。能否给我报个价？`;
+    sendMessage(session.id, user.id, 'text', message);
+    alert(`已向 ${supplierName} 发送邀请报价消息`);
+    navigate(`/message/${session.id}`);
+  };
+
+  const renderStars = (rating: number) => {
+    const stars = [];
+    const fullStars = Math.floor(rating);
+    const hasHalfStar = rating % 1 >= 0.5;
+
+    for (let i = 0; i < 5; i++) {
+      stars.push(
+        <Star
+          key={i}
+          size={12}
+          className={cn(
+            i < fullStars
+              ? 'text-yellow-400 fill-yellow-400'
+              : i === fullStars && hasHalfStar
+                ? 'text-yellow-400 fill-yellow-400'
+                : 'text-gray-300'
+          )}
+        />
+      );
+    }
+    return stars;
+  };
+
+  if (recommendedSuppliers.length === 0) {
+    return (
+      <div className="text-center py-8">
+        <div className="w-16 h-16 mx-auto mb-3 rounded-2xl bg-gray-100 flex items-center justify-center">
+          <Package size={24} className="text-gray-400" />
+        </div>
+        <p className="text-sm text-gray-500">暂无匹配的供应商</p>
+        <p className="text-xs text-gray-400 mt-1">继续等待其他供应商报价</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      {recommendedSuppliers.map(({ stockItem, matchReasons }, index) => (
+        <motion.div
+          key={stockItem.id}
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: index * 0.1 }}
+        >
+          <Card variant="outlined" padding="md">
+            <div className="flex gap-3">
+              <div className="relative">
+                <img
+                  src={stockItem.supplier.avatar}
+                  alt={stockItem.supplier.name}
+                  className="w-12 h-12 rounded-full object-cover border-2 border-white shadow-sm"
+                />
+                {stockItem.supplier.verified && (
+                  <div className="absolute -bottom-0.5 -right-0.5 w-4 h-4 bg-green-500 rounded-full flex items-center justify-center">
+                    <Check size={10} className="text-white" />
+                  </div>
+                )}
+              </div>
+
+              <div className="flex-1 min-w-0">
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-sm font-semibold text-gray-900 truncate">
+                        {stockItem.supplier.name}
+                      </span>
+                      {stockItem.supplier.certificationBadges.map((badge, i) => (
+                        <Badge key={i} variant="success" size="sm">
+                          {badge}
+                        </Badge>
+                      ))}
+                    </div>
+                    <div className="flex items-center gap-1.5 mt-0.5">
+                      <MapPin size={10} className="text-gray-400" />
+                      <span className="text-xs text-gray-500">{stockItem.supplier.city}</span>
+                      <span className="text-gray-300">·</span>
+                      <div className="flex items-center gap-0.5">
+                        {renderStars(stockItem.supplier.reputation.starRating)}
+                        <span className="text-xs text-gray-500 ml-0.5">
+                          {stockItem.supplier.reputation.starRating.toFixed(1)}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="text-right flex-shrink-0">
+                    <div className="text-lg font-bold text-red-500">
+                      ¥{stockItem.unitPrice}
+                    </div>
+                    <div className="text-[10px] text-gray-400">
+                      库存 {stockItem.stockQty} 件
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-2 p-2 bg-gray-50 rounded-lg">
+                  <div className="text-xs text-gray-700">
+                    匹配配件：<span className="font-medium">{stockItem.partName}</span>
+                  </div>
+                  <div className="flex flex-wrap gap-1 mt-1.5">
+                    {matchReasons.map((reason, i) => (
+                      <Chip
+                        key={i}
+                        variant={reason === '当天可发' ? 'warning' : 'primary'}
+                        size="sm"
+                      >
+                        {reason === '当天可发' && <Truck size={8} className="mr-0.5" />}
+                        {reason}
+                      </Chip>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="flex gap-2 mt-3">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    block
+                    leftIcon={<MessageCircle size={14} />}
+                    onClick={() => handleChat(stockItem.supplierId)}
+                  >
+                    立即聊天
+                  </Button>
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    block
+                    leftIcon={<HandCoins size={14} />}
+                    onClick={() => handleInviteQuote(stockItem.supplierId, stockItem.supplier.name)}
+                  >
+                    邀请报价
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </Card>
+        </motion.div>
+      ))}
+    </div>
+  );
+}
+
+function UrgentPublishSuccess({
+  post,
+  onViewDetail,
+  onBackToList,
+}: {
+  post: UrgentPost;
+  onViewDetail: () => void;
+  onBackToList: () => void;
+}) {
+  return (
+    <div className="min-h-screen bg-gray-50 pb-28">
+      <motion.div
+        initial={{ y: -20, opacity: 0 }}
+        animate={{ y: 0, opacity: 1 }}
+        className="sticky top-0 z-40 bg-white/90 backdrop-blur-lg border-b border-gray-100"
+      >
+        <div className="px-4 py-3 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={onBackToList}
+              className="w-9 h-9 rounded-xl bg-gray-100 flex items-center justify-center hover:bg-gray-200 transition-colors"
+            >
+              <ArrowLeft size={18} className="text-gray-600" />
+            </button>
+            <div>
+              <h1 className="text-base font-bold text-gray-900">发布成功</h1>
+              <p className="text-[10px] text-gray-400">已为您推荐匹配的供应商</p>
+            </div>
+          </div>
+        </div>
+      </motion.div>
+
+      <div className="px-4 py-4 space-y-4">
+        <motion.div
+          initial={{ scale: 0.8, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          transition={{ type: 'spring', damping: 15 }}
+          className="text-center py-6"
+        >
+          <div className="w-20 h-20 mx-auto mb-4 rounded-full bg-green-100 flex items-center justify-center">
+            <CheckCircle size={48} className="text-green-500" />
+          </div>
+          <h2 className="text-xl font-bold text-gray-900 mb-1">急件发布成功！</h2>
+          <p className="text-sm text-gray-500">
+            {post.carPlatform.brand} {post.partName} · {post.quantity} 件
+          </p>
+          <div className="flex items-center justify-center gap-2 mt-2">
+            <Badge variant="primary" size="sm">
+              {post.category || '已自动分类'}
+            </Badge>
+            <Badge variant="urgent" size="sm">
+              <Clock size={8} className="mr-0.5" />
+              倒计时中
+            </Badge>
+          </div>
+        </motion.div>
+
+        <Card variant="outlined" padding="md">
+          <div className="flex items-center gap-2 mb-3">
+            <div className="w-7 h-7 rounded-lg bg-orange-50 flex items-center justify-center">
+              <Sparkles size={14} className="text-orange-500" />
+            </div>
+            <h3 className="text-sm font-semibold text-gray-900">推荐供应商</h3>
+            <span className="text-xs text-gray-400">按匹配度排序</span>
+          </div>
+          <RecommendedSuppliers post={post} />
+        </Card>
+
+        <div className="flex gap-3">
+          <Button variant="secondary" block onClick={onBackToList}>
+            返回列表
+          </Button>
+          <Button variant="primary" block onClick={onViewDetail} rightIcon={<ChevronRight size={16} />}>
+            查看详情
+          </Button>
+        </div>
+      </div>
     </div>
   );
 }
